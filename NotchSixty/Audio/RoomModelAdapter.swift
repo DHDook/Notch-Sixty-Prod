@@ -22,6 +22,10 @@ enum RoomModelAdapter {
     static let referenceMicName = "Reference microphone"
     static let unassignedSeatName = "Unassigned position"
 
+    /// The stable IDs of the two stereo feed points, for linking the geometry advisor's speakers (E29 S4).
+    static let leftFeedID = RoomModelID.stable("point.speakerFeed", leftFeedName.lowercased())
+    static let rightFeedID = RoomModelID.stable("point.speakerFeed", rightFeedName.lowercased())
+
     static func build(_ input: RoomModelAdapterInput) -> RoomModel {
         var points: [UUID: RoomPoint] = [:]
         var order: [UUID] = []

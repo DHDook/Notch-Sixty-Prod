@@ -108,7 +108,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e12.blind-listening` | E12 | dark; S26: registered; the comparison service and its tests, no user-visible reader yet | S28 | FC (E12) |
 | `e19.self-qualification` | E19 | dark; S12a: evidence check and self-qualified permit basis; S12b: treatment probe arm, SQ5 evaluator and runner (built dark, no production capturer); S12c-engine: probe stimulus feed and capturer | S12c-ui | FC (E19) |
 | `e12.setup-flow` | E12 | dark; S10: quick setup path (a step preset of the guided setup flow) | S31 | FC (E12) |
-| `e12.settings-page` | E12 | dark; S23: five Settings tabs, About, hidden developer switch in release, page-display reset | S25 | FC (E12) |
+| `e12.settings-page` | E12 | dark; S23: five Settings tabs, About, hidden developer switch in release, page-display reset; S24: resume on open and permission status (built, PR pending) | S25 | FC (E12) |
 | `e12.system-pages` | E12 | dark; S15: Overview checklist and out-of-date notice | S18 | FC (E12) |
 | `e12.active-acoustics-page` | E12 | dark; S19: one Quiet Zone card | S22 | FC (E12) |
 | `e13.headphones-page` | E13 | dark; S9: page clean-up | S12 | FC (E13) |

@@ -50,7 +50,7 @@ final class DashboardRemoteGraduationTests: XCTestCase {
         let product = ProductController(audioEngine: engine)
         let size = CGSize(width: 1_280, height: 800)
         let dashboard = HostedPage(
-            ProductionStatusDashboardView(engine: engine, profiles: product.profiles, navigation: ProductionNavigation(), failsafeMessage: nil),
+            ProductionStatusDashboardView(engine: engine, profiles: product.profiles, navigation: ProductionNavigation(), failsafeMessage: nil, resume: product.resume),
             size: size)
         let panel = HostedPage(ProductionRemotePanel(product: product), size: CGSize(width: 300, height: 700))
         // The hosted harness sees only AppKit-backed controls; the panel's pickers and sliders are SwiftUI-drawn, so the
@@ -81,7 +81,7 @@ final class DashboardRemoteGraduationTests: XCTestCase {
         let product = ProductController(audioEngine: engine)
         for size in [CGSize(width: 1_280, height: 800), CGSize(width: 1_920, height: 1_000)] {
             let page = HostedPage(
-                ProductionStatusDashboardView(engine: engine, profiles: product.profiles, navigation: ProductionNavigation(), failsafeMessage: nil),
+                ProductionStatusDashboardView(engine: engine, profiles: product.profiles, navigation: ProductionNavigation(), failsafeMessage: nil, resume: product.resume),
                 size: size)
             let frames = accessibilityFrames(page)
             try XCTSkipIf(frames.isEmpty, "the hosting view exposes no accessibility frames in this harness")

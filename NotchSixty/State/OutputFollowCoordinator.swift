@@ -112,6 +112,11 @@ final class OutputFollowCoordinator: ObservableObject, OutputFollowEngineControl
     @Published private(set) var storedMode: OutputSelectionMode
 
     private(set) var driver: OutputFollowEventDriver!
+    /// E15 S3b: macOS notifications for each settled switch. Set by `OutputFollowWiring`; nil where a test does not need it.
+    var notifications: FollowNotificationController? {
+        didSet { notifications?.onPauseResponse = { [weak self] in self?.reopenPauseSheet() } }
+    }
+    private var lastPause: OutputFollowAnnouncement?
 
     // The one in-flight transaction's side results, read by `handle(_:)`.
     private var disarmedByTransaction: [String] = []
@@ -160,12 +165,22 @@ final class OutputFollowCoordinator: ObservableObject, OutputFollowEngineControl
         OutputSelectionMode.store(mode, in: defaults)
         storedMode = mode
         if on { ambiguousUIDs = profiles.seedOutputBindingsFromAssociations() }
+        notifications?.followingChanged(on)
         reconcile()
         if on { driver.syncToCurrentDefault() }
     }
 
     /// Call at launch and on every flag or mode change: installs the listener only while following.
-    func reconcile() { driver.reconcile() }
+    func reconcile() {
+        driver.reconcile()
+        notifications?.refreshInBackground()
+    }
+
+    /// A clicked pause notice shows the "Choose…" sheet again while the output is still paused.
+    func reopenPauseSheet() {
+        guard pausedKey != nil, let lastPause else { return }
+        announcement = lastPause
+    }
 
     /// Call when an excluded state ends (Safe Launch decision made, capture finished, engine left `failed`).
     func exclusionEnded() { driver.resumePending() }
@@ -265,7 +280,10 @@ final class OutputFollowCoordinator: ObservableObject, OutputFollowEngineControl
 
     private func publish(_ target: OutputFollowTarget, _ kind: OutputFollowAnnouncement.Kind, _ disarmed: [String]) {
         let name = target.displayName.isEmpty ? displayName(target.key.deviceUID) : target.displayName
-        announcement = OutputFollowAnnouncement(device: name, kind: kind, disarmed: disarmed)
+        let note = OutputFollowAnnouncement(device: name, kind: kind, disarmed: disarmed)
+        announcement = note
+        if note.isPause { lastPause = note }
+        notifications?.announce(note)
         if case .paused = kind { pausedKey = target } else { pausedKey = nil }
     }
 }
