@@ -9,6 +9,8 @@ struct ProductionSettingsView: View {
     @ObservedObject var product: ProductController
     @ObservedObject var featureFlags: FeatureFlags
     @State private var backupMessage: String?
+    @State private var selectedTab: SettingsTab = .general
+    @State private var displayResetMessage: String?
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -135,7 +137,13 @@ struct ProductionSettingsView: View {
     }
 
     var body: some View {
-        generalSettings
+        Group {
+            if featureFlags.isEnabled(.settingsPage) {
+                tabbedSettings
+            } else {
+                generalSettings
+            }
+        }
             .task {
                 preferences.apply(to: product.audioEngine)
                 preferences.refreshLaunchAtLoginStatus()
@@ -149,230 +157,20 @@ struct ProductionSettingsView: View {
             )
     }
 
+    /// The single scrolling list used while `e12.settings-page` is off (today's layout).
     private var generalSettings: some View {
         ScrollView {
             GlassEffectContainer(spacing: 14) {
                 VStack(alignment: .leading, spacing: 14) {
-                    settingsCard(title: "About", systemImage: "info.circle") {
-                        LabeledContent("Version") {
-                            Text(version).monospacedDigit()
-                        }
-                        LabeledContent("Build") {
-                            Text(build).monospacedDigit()
-                        }
-                    }
-
-                    settingsCard(title: "Appearance", systemImage: "circle.lefthalf.filled") {
-                        HStack(spacing: 10) {
-                            Text("Appearance")
-                            Picker("", selection: $preferences.appearance) {
-                                ForEach(ApplicationAppearanceMode.allCases) { mode in
-                                    Text(mode.displayName).tag(mode)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .fixedSize()
-                        }
-                    }
-
-                    settingsCard(title: "Volume & Feedback", systemImage: "speaker.wave.2") {
-                        HStack(spacing: 10) {
-                            Text("Step size")
-                            Spacer()
-                            Picker("Volume key step size", selection: $preferences.volumeStepResolution) {
-                                Section("Fraction of range") {
-                                    ForEach(ApplicationVolumeStepResolution.fractions) { resolution in
-                                        Text(resolution.displayName).tag(resolution)
-                                    }
-                                }
-                                Section("Decibels") {
-                                    ForEach(ApplicationVolumeStepResolution.decibelSteps) { resolution in
-                                        Text(resolution.displayName).tag(resolution)
-                                    }
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .fixedSize()
-                        }
-
-                        Text("Controls Notch Sixty's software master-volume change for each intercepted volume-key press. Fractions move the slider by 1/16, 1/32 or 1/64 of its range. dB steps change the level by a fixed amount, down to −80 dB and then silence, and show the volume in dB (0 dB at full volume) in the menu bar and popup. The physical output-device volume is not stepped by this setting.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Divider()
-
-                        Toggle("Show volume in menu bar", isOn: $preferences.showVolumeInMenuBar)
-                            .disabled(preferences.presence == .dock)
-                        Text("Show Notch Sixty's master-volume percentage beside the tray icon. Requires Menu Bar or Both in App Presence.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Toggle("Show volume popup", isOn: $preferences.showVolumePopup)
-                        HStack(spacing: 10) {
-                            Text("Popup position")
-                            Spacer()
-                            Picker("Volume popup position", selection: $preferences.volumePopupPosition) {
-                                ForEach(VolumeFeedbackPopupPosition.allCases) { position in
-                                    Text(position.displayName).tag(position)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .fixedSize()
-                        }
-                        .disabled(!preferences.showVolumePopup)
-                        Text("Briefly display Notch Sixty's volume when it changes. Follow macOS Popup appears beside the macOS volume indicator, at the top right or, while another app is full screen, the top centre. macOS gives sandboxed apps no public way to hide its indicator.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Toggle("Cover the macOS volume popup", isOn: $preferences.coverSystemVolumePopup)
-                            .disabled(
-                                !preferences.showVolumePopup
-                                    || preferences.volumePopupPosition != .topRight
-                            )
-                        Text("Follow macOS Popup only. Draws Notch Sixty's popup over the macOS one, with a solid glass style so it does not show through. The macOS popup still appears underneath and may flash briefly.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
-                        HStack(spacing: 10) {
-                            Text("Show Notch Sixty in")
-                            Picker("", selection: $preferences.presence) {
-                                ForEach(ApplicationPresenceMode.allCases) { mode in
-                                    Text(mode.displayName).tag(mode)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .fixedSize()
-                        }
-
-                        Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    settingsCard(title: "Presets", systemImage: "music.note.list") {
-                        Toggle("Show A/B comparison in the toolbar", isOn: $abComparisonEnabled)
-                        Text("Adds the A/B controls beside the Content Preset menu for capturing and auditioning two content-DSP states. While an A/B audition is running the controls stay visible until you exit it.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    settingsCard(title: "Startup", systemImage: "power") {
-                        Toggle(
-                            "Launch at Login",
-                            isOn: Binding(
-                                get: { preferences.launchAtLoginEnabled },
-                                set: { preferences.setLaunchAtLogin($0) }
-                            )
-                        )
-
-                        LabeledContent("Status") {
-                            Text(preferences.launchAtLoginStatusDescription)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if let error = preferences.launchAtLoginError {
-                            Label(error, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .textSelection(.enabled)
-                        }
-
-                        Text("Launch at Login is optional and does not automatically start audio processing. Processing remains an explicit user action in v1.0.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    settingsCard(title: "Permissions", systemImage: "lock.shield") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("System Audio")
-                                .font(.subheadline.weight(.medium))
-                            Text("Requested by macOS when processing needs system-audio capture.")
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Measurement Microphone")
-                                .font(.subheadline.weight(.medium))
-                            Text("Requested only when you start a microphone-based measurement or calibration workflow.")
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Text("If processing starts but receives no system audio after permission was denied, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    settingsCard(
-                        title: "Backup & Restore",
-                        systemImage: "externaldrive.badge.timemachine"
-                    ) {
-                        HStack(spacing: 10) {
-                            Button {
-                                saveBackup()
-                            } label: {
-                                Label(
-                                    "Save Backup…",
-                                    systemImage: "square.and.arrow.up"
-                                )
-                            }
-                            .buttonStyle(.glass)
-
-                            Button {
-                                restoreBackup()
-                            } label: {
-                                Label(
-                                    "Restore Backup…",
-                                    systemImage: "square.and.arrow.down"
-                                )
-                            }
-                            .buttonStyle(.glass)
-                            .disabled(
-                                product.audioEngine.lifecycleState != .idle
-                            )
-                        }
-
-                        Text(
-                            "The .n60backup bundle includes saved presets and "
-                            + "Playback Systems, Room Correction projects, "
-                            + "Measurement Lab sessions, binaural profiles, "
-                            + "and portable app preferences. Launch at Login, "
-                            + "macOS permissions, and physical acceptance "
-                            + "authority are never changed by restore."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                        Text(
-                            "Restored hardware bindings are never silently "
-                            + "reassigned. Systems that reference unavailable "
-                            + "devices are marked Needs Mapping and remain "
-                            + "blocked from activation until reviewed."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                        if let backupMessage {
-                            Text(backupMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-
-                    settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
-                        Toggle("Show developer tools", isOn: $showDeveloperTools)
-                        Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    aboutCard
+                    appearanceCard
+                    volumeCard
+                    presenceCard
+                    presetsCard
+                    startupCard
+                    permissionsCard
+                    backupCard
+                    developerToolsCard
 
                     #if DEBUG
                     developerSettings
@@ -382,23 +180,343 @@ struct ProductionSettingsView: View {
                         AudioInputPathSettingsSection(model: product.audioInputPath)
                     }
 
-                    settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
-                        Button {
-                            copyDiagnostics()
-                        } label: {
-                            Label("Copy Diagnostics", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(.glass)
+                    supportCard
+                }
+            }
+            .padding(18)
+        }
+    }
 
-                        Text("Copies app/build, macOS, audio device/rate, active preset/system, bypass state, and DSP latency. It does not include captured audio or room-measurement samples.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+    /// E12 S23: five tabs. Each tab is a scrolling page of cards.
+    private var tabbedSettings: some View {
+        TabView(selection: $selectedTab) {
+            ForEach(SettingsTab.allCases) { tab in
+                tabPage(tab)
+                    .tabItem { Label(tab.title, systemImage: tab.systemImage) }
+                    .tag(tab)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tabPage(_ tab: SettingsTab) -> some View {
+        ScrollView {
+            GlassEffectContainer(spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    switch tab {
+                    case .general:
+                        appearanceCard
+                        presenceCard
+                        startupCard
+                        presetsCard
+                        displaysCard
+                        if featureFlags.isEnabled(.virtualDriver) {
+                            AudioInputPathSettingsSection(model: product.audioInputPath)
+                        }
+                        if DeveloperToolsPolicy.offersSwitch(policy: FeatureFlags.buildPolicy) {
+                            developerToolsCard
+                        }
+                        #if DEBUG
+                        developerSettings
+                        #endif
+                    case .volume:
+                        volumeCard
+                    case .privacy:
+                        permissionsCard
+                    case .data:
+                        backupCard
+                    case .about:
+                        SettingsAboutView(
+                            version: version,
+                            build: build,
+                            onCopyDiagnostics: copyDiagnostics
+                        )
                     }
                 }
             }
             .padding(18)
         }
     }
+
+    private var displaysCard: some View {
+        settingsCard(title: "Page Displays", systemImage: "gauge.with.dots.needle.bottom.50percent") {
+            Button {
+                resetPageDisplays()
+            } label: {
+                Label("Reset Page Displays", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(.glass)
+
+            Text("Puts the meter scale, the Equalizer graph range and analyser, and the Dynamics curve panels back to how they first looked. Your presets and sound settings are not changed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let displayResetMessage {
+                Text(displayResetMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func resetPageDisplays() {
+        product.profiles.eqProgramAnalyser.setOn(false)
+        product.profiles.eqProgramAnalyser.setMode(.default)
+        PageDisplayPreferences.reset()
+        displayResetMessage = "Page displays were reset."
+    }
+
+    private var aboutCard: some View {
+        settingsCard(title: "About", systemImage: "info.circle") {
+            LabeledContent("Version") {
+                Text(version).monospacedDigit()
+            }
+            LabeledContent("Build") {
+                Text(build).monospacedDigit()
+            }
+        }
+    }
+
+    private var appearanceCard: some View {
+        settingsCard(title: "Appearance", systemImage: "circle.lefthalf.filled") {
+            HStack(spacing: 10) {
+                Text("Appearance")
+                Picker("", selection: $preferences.appearance) {
+                    ForEach(ApplicationAppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+    }
+
+    private var volumeCard: some View {
+        settingsCard(title: "Volume & Feedback", systemImage: "speaker.wave.2") {
+            HStack(spacing: 10) {
+                Text("Step size")
+                Spacer()
+                Picker("Volume key step size", selection: $preferences.volumeStepResolution) {
+                    Section("Fraction of range") {
+                        ForEach(ApplicationVolumeStepResolution.fractions) { resolution in
+                            Text(resolution.displayName).tag(resolution)
+                        }
+                    }
+                    Section("Decibels") {
+                        ForEach(ApplicationVolumeStepResolution.decibelSteps) { resolution in
+                            Text(resolution.displayName).tag(resolution)
+                        }
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+
+            Text("How far Notch Sixty's volume moves each time you press a volume key. A fraction moves the slider by that part of its range. A dB step changes the level by a fixed amount, down to −80 dB and then silence, and shows the volume in dB (0 dB is full volume). This changes Notch Sixty's volume, not your speakers' own volume.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Toggle("Show volume in menu bar", isOn: $preferences.showVolumeInMenuBar)
+                .disabled(preferences.presence == .dock)
+            Text("Shows the volume beside the menu bar icon. Needs “Menu Bar” or “Both” under Show Notch Sixty in.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Show volume popup", isOn: $preferences.showVolumePopup)
+            HStack(spacing: 10) {
+                Text("Popup position")
+                Spacer()
+                Picker("Volume popup position", selection: $preferences.volumePopupPosition) {
+                    ForEach(VolumeFeedbackPopupPosition.allCases) { position in
+                        Text(position.displayName).tag(position)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            .disabled(!preferences.showVolumePopup)
+            Text("Briefly shows the volume when it changes. “Follow macOS Popup” puts it beside the macOS volume indicator, at the top right or, while another app is full screen, at the top centre. macOS does not let apps hide its own indicator.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Cover the macOS volume popup", isOn: $preferences.coverSystemVolumePopup)
+                .disabled(
+                    !preferences.showVolumePopup
+                        || preferences.volumePopupPosition != .topRight
+                )
+            Text("Only with “Follow macOS Popup”. Draws Notch Sixty's popup over the macOS one so it does not show through. The macOS popup still appears underneath and may flash briefly.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var presenceCard: some View {
+        settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
+            HStack(spacing: 10) {
+                Text("Show Notch Sixty in")
+                Picker("", selection: $preferences.presence) {
+                    ForEach(ApplicationPresenceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+
+            Text("“Menu Bar” keeps the controls available without a Dock icon. “Both” shows the app in the Dock and the menu bar.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var presetsCard: some View {
+        settingsCard(title: "Presets", systemImage: "music.note.list") {
+            Toggle("Show A/B comparison in the toolbar", isOn: $abComparisonEnabled)
+            Text("Adds A/B buttons beside the preset menu so you can store two sounds and switch between them. While a comparison is running the buttons stay visible until you finish it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var startupCard: some View {
+        settingsCard(title: "Startup", systemImage: "power") {
+            Toggle(
+                "Launch at Login",
+                isOn: Binding(
+                    get: { preferences.launchAtLoginEnabled },
+                    set: { preferences.setLaunchAtLogin($0) }
+                )
+            )
+
+            LabeledContent("Status") {
+                Text(preferences.launchAtLoginStatusDescription)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let error = preferences.launchAtLoginError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+
+            Text("Opening Notch Sixty at login does not start audio. You press Start yourself.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var permissionsCard: some View {
+        settingsCard(title: "Permissions", systemImage: "lock.shield") {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("System Audio")
+                    .font(.subheadline.weight(.medium))
+                Text("macOS asks for this when Notch Sixty first needs to hear your Mac's audio.")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Measurement Microphone")
+                    .font(.subheadline.weight(.medium))
+                Text("macOS asks for this only when you start a measurement that uses a microphone.")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("If processing starts but you hear nothing after saying no to this permission, allow Notch Sixty in System Settings under Privacy & Security → Screen & System Audio Recording, then reopen the app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var backupCard: some View {
+        settingsCard(
+            title: "Backup & Restore",
+            systemImage: "externaldrive.badge.timemachine"
+        ) {
+            HStack(spacing: 10) {
+                Button {
+                    saveBackup()
+                } label: {
+                    Label(
+                        "Save Backup…",
+                        systemImage: "square.and.arrow.up"
+                    )
+                }
+                .buttonStyle(.glass)
+
+                Button {
+                    restoreBackup()
+                } label: {
+                    Label(
+                        "Restore Backup…",
+                        systemImage: "square.and.arrow.down"
+                    )
+                }
+                .buttonStyle(.glass)
+                .disabled(
+                    product.audioEngine.lifecycleState != .idle
+                )
+            }
+
+            Text(
+                "A backup file holds your presets, speaker systems, "
+                + "room correction projects, measurement sessions, "
+                + "headphone profiles and app settings. Restoring never "
+                + "changes Launch at Login or your macOS permissions."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Text(
+                "A restored system never moves to a different device on its own. "
+                + "If its device is not connected, it is marked Needs Mapping "
+                + "and stays off until you choose a device."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if let backupMessage {
+                Text(backupMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var developerToolsCard: some View {
+        settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
+            Toggle("Show developer tools", isOn: $showDeveloperTools)
+            Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var supportCard: some View {
+        settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
+            Button {
+                copyDiagnostics()
+            } label: {
+                Label("Copy Diagnostics", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.glass)
+
+            Text("Copies the app version, macOS version, audio device and sample rate, active preset and system, bypass state and processing delay. It does not include audio or measurement recordings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
 
     #if DEBUG
     /// Debug builds only: switch unfinished features on for local testing.
