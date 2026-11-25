@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -69,11 +70,18 @@ enum OutputFollowWiring {
             },
             displayName: { [weak engine] uid in engine?.outputDevices.first { $0.uid == uid }?.name ?? uid })
 
+        // E15 S3b: macOS notifications. The notification center is touched only outside a test host.
+        let notifier = UserNotificationFollowNotifier()
+        let notifications = FollowNotificationController(
+            notifier: notifier, isActive: { [weak coordinator] in coordinator?.isFollowing ?? false })
+        coordinator.notifications = notifications
+        if !ProductProcessEnvironment.isHostingTests { notifier.installResponseHandling() }
+
         profiles.ignoresAssociatedOutput = { [weak coordinator] in coordinator?.isFollowing ?? false }
 
         // An excluded state ending applies the pending default (note 11). Each signal just asks again; the policy
         // defers again while any block is still active.
-        var observers: [AnyObject] = []
+        var observers: [AnyObject] = [notifier]
         observers.append(ObservationSubscription(
             value: { engine.lifecycleState },
             onChange: { [weak coordinator] state in if state != .failed { coordinator?.exclusionEnded() } }))
@@ -86,6 +94,9 @@ enum OutputFollowWiring {
         })
         ended(recovery.objectWillChange.sink { [weak coordinator] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { coordinator?.exclusionEnded() } }
+        })
+        ended(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { _ in
+            MainActor.assumeIsolated { notifications.refreshInBackground() }
         })
         return (coordinator, observers)
     }
