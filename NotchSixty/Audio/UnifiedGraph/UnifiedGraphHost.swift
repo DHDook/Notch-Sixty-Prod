@@ -5,6 +5,8 @@ enum UnifiedGraphError: Error, Equatable {
     case coreStatus(UInt32)
     case invalidConfiguration(String)
     case unsupportedConfiguration(String)
+    /// E19 S12c: a post-only apply found the edit needs a rebuild (new topology, a non-live word, or a full mailbox).
+    case requiresRebuild
 }
 
 /// Outcome of `UnifiedGraphHost.apply`.
@@ -186,6 +188,33 @@ final class UnifiedGraphHost: @unchecked Sendable {
         let result = try applyLocked(newSpec, linearFade: linearFade)
         retuneParallelRenderLocked()
         return result
+    }
+
+    /// E19 S12c: moves the graph to `newSpec` only when every change is a live parameter post. Anything that would rebuild
+    /// (a topology change, a word that is not live, a full mailbox) throws `requiresRebuild` and leaves the graph and the
+    /// recorded spec exactly as they were. Used while a stage is armed, where a rebuild would disarm it.
+    @discardableResult
+    func applyPostOnly(_ newSpec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        var wanted = newSpec
+        if let index = inputOversIndexLocked(in: wanted) {
+            wanted.stages[index].params = [inputOverDetect ? 1 : 0, inputOverGeneration]
+        }
+        if wanted == spec { return .unchanged }
+        guard wanted.hasSameTopology(as: spec), !wanted.changesPeqBandType(since: spec) else { throw UnifiedGraphError.requiresRebuild }
+        let records = wanted.changedParameters(since: spec)
+        if records.isEmpty {
+            spec = wanted
+            return .unchanged
+        }
+        let status = records.withUnsafeBufferPointer { n60_graph_post_params(graph, $0.baseAddress, UInt32($0.count)) }
+        guard status == N60_STATUS_OK else {
+            if status == N60_STATUS_UNSUPPORTED || status == N60_STATUS_QUEUE_FULL { throw UnifiedGraphError.requiresRebuild }
+            throw UnifiedGraphError.coreStatus(status.rawValue)
+        }
+        spec = wanted
+        return .posted(count: records.count)
     }
 
     // MARK: Parallel render workers (E20 S6)

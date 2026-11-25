@@ -139,9 +139,9 @@ final class ProductController: ObservableObject {
             microphone: calibration
         )
         self.multichannelCalibration = multichannelCalibration
-        // E19 S12b: the treated repeat measurement's captures. No capturer yet (S12c wires the stimulus path), so none are taken.
+        // E19 S12c: the treated repeat measurement's captures, from the cued sweep stimulus and the seat microphone.
         let mimoProbe = MIMOTreatmentProbeRunner(
-            treatment: audioEngine.treatment, capturer: nil, armProbe: { [audioEngine] in try await audioEngine.requestMIMOProbeArm() })
+            treatment: audioEngine.treatment, capturer: MIMOTreatmentProbeCapturer.production(engine: audioEngine, calibration: calibration), armProbe: { [audioEngine] in try await audioEngine.requestMIMOProbeArm() })
         self.mimoTreatmentProbe = mimoProbe
         self.mimoTreatment = MIMOTreatmentController(
             host: audioEngine, flags: FeatureFlags(),
@@ -272,9 +272,9 @@ final class ProductController: ObservableObject {
             microphone: calibration
         )
         self.multichannelCalibration = multichannelCalibration
-        // E19 S12b: the treated repeat measurement's captures. No capturer yet (S12c wires the stimulus path), so none are taken.
+        // E19 S12c: the treated repeat measurement's captures, from the cued sweep stimulus and the seat microphone.
         let mimoProbe = MIMOTreatmentProbeRunner(
-            treatment: audioEngine.treatment, capturer: nil, armProbe: { [audioEngine] in try await audioEngine.requestMIMOProbeArm() })
+            treatment: audioEngine.treatment, capturer: MIMOTreatmentProbeCapturer.production(engine: audioEngine, calibration: calibration), armProbe: { [audioEngine] in try await audioEngine.requestMIMOProbeArm() })
         self.mimoTreatmentProbe = mimoProbe
         self.mimoTreatment = MIMOTreatmentController(
             host: audioEngine, flags: FeatureFlags(),

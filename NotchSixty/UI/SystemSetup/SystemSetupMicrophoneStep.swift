@@ -35,6 +35,7 @@ struct SystemSetupMicrophoneStep: View {
                     switch model.level.target {
                     case .lane(let lane): return lane
                     case .allProgram(let includeLFE): return includeLFE ? -2 : -1
+                    case .lanes: return -1
                     }
                 },
                 set: { model.selectNoiseTarget(lane: $0 < 0 ? nil : $0, includeLFE: $0 == -2) }
