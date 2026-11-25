@@ -38,7 +38,7 @@ extension FeatureFlag {
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
         .setupFlow, .systemPages, .selfQualification, .headphonesPage, .activeAcousticsPage,
-        .activeCommissioning, .settingsPage
+        .activeCommissioning, .settingsPage, .automation, .localAPI
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -542,5 +542,25 @@ extension FeatureFlag {
         id: "e8.active-commissioning",
         title: "Active-speaker commissioning",
         epic: "E8"
+    )
+}
+
+extension FeatureFlag {
+    /// E16: automation and remote, tier 1. S1 adds `ControlService` (one command path), the App Intents (which refuse while
+    /// this is off) and the remote panel's Bypass, room correction and Playback System controls; later slices add hotkeys,
+    /// media-key additions and the widget. Swift only; the engine never reads it. Off: intents refuse, today's remote.
+    /// Graduates in E16 S6 (available, never armed); removed in the flag-cleanup phase.
+    static let automation = FeatureFlag(
+        id: "e16.automation",
+        title: "Automation and remote",
+        epic: "E16"
+    )
+
+    /// E16: the local API, tier 2 (S4, S5). Separate so the API can be switched off alone. Registered in S1 with no reader.
+    /// Graduating never turns the API on. Graduates in E16 S6; removed in the flag-cleanup phase.
+    static let localAPI = FeatureFlag(
+        id: "e16.local-api",
+        title: "Local API",
+        epic: "E16"
     )
 }

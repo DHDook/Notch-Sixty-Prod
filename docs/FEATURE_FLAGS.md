@@ -105,6 +105,8 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e32.dynamics-sound` | E32 | graduated | 21 Nov 2026 (S6) | FC (E32) |
 | `e15.follow-output` | E15 | dark; S1: registered, binding table and decision policy only, no reader in the app yet | S4 | FC (E15) |
 | `e12.dashboard-remote` | E12 | dark; S12: status-page Dashboard (cards, health strip, attention, now playing) | S14 | FC (E12) |
+| `e16.automation` | E16 | dark; S1: `ControlService`, App Intents (refuse while off) and remote panel additions | S6 | FC (E16) |
+| `e16.local-api` | E16 | dark; S1: registered, no reader yet | S6 | FC (E16) |
 | `e12.blind-listening` | E12 | dark; S26: registered; the comparison service and its tests, no user-visible reader yet | S28 | FC (E12) |
 | `e19.self-qualification` | E19 | dark; S12a: evidence check and self-qualified permit basis; S12b: treatment probe arm, SQ5 evaluator and runner (built dark, no production capturer); S12c-engine: probe stimulus feed and capturer | S12c-ui | FC (E19) |
 | `e12.setup-flow` | E12 | dark; S10: quick setup path (a step preset of the guided setup flow) | S31 | FC (E12) |
@@ -183,6 +185,8 @@ E22; the software part graduates.
 | `e12.setup-flow` | E12 | Off by default. Guided setup improvements: S10 quick path (Output, Microphone and level, one seat, alignment, bass, correction, Verify, Save), then S11 verdicts and S29-S31 shell, graphs and level runs. Off: guided setup is as it is today. Removed in FC (E12) |
 | `e12.settings-page` | E12 | Off by default. Settings window: S23 five tabs (General, Volume, Privacy, Data, About), About with licences, privacy statement and help, page-display reset, and the developer switch hidden in release builds; S24-S25 resume, permissions, backup, reset. Off: the Settings window is as it is today. Removed in FC (E12) |
 | `e12.system-pages` | E12 | Off by default. System pages: S15 Overview checklist and out-of-date notice (the verified-status fix is not gated), then S16-S18. Off: the System tabs are as they are today. Removed in FC (E12) |
+| `e16.automation` | E16 | Off by default. Automation and remote, tier 1: S1 is `ControlService` (one command path, never arms or selects an output), the App Intents (compiled in always, refuse with "Not available in this build" while off, no Spotlight or Siri phrases until S6) and the remote panel's Bypass, room correction and Playback System controls; later slices add hotkeys, media-key additions and the widget. Off: intents refuse, today's remote. Removed in FC (E16) |
+| `e16.local-api` | E16 | Off by default. Local API, tier 2 (S4, S5), switchable alone with `-NotchSixtyFeatures -e16.local-api`. Registered in S1 with no reader. Graduating never turns the API on. Removed in FC (E16) |
 | `e12.active-acoustics-page` | E12 | Off by default. Active Acoustics page: S19 one Quiet Zone card (setup list, where to quiet, Arm and Feed-forward switches, Ready or Not ready, Advanced disclosure), then S20-S22. Off: the page is as it is today. Never arms anything. Removed in FC (E12) |
 | `e34.design-language` | E34 | Off by default. The app-wide design language: macOS 27 Liquid Glass rules (`docs/DESIGN_LANGUAGE.md`) and, from S1, the shared values and components. Off: today's look. Removed in FC (E34) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |
