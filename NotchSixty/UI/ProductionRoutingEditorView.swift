@@ -34,7 +34,7 @@ struct ProductionRoutingEditorView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             header
             templateCard
             ForEach(model.configuration.speakers) { speaker in
@@ -48,11 +48,11 @@ struct ProductionRoutingEditorView: View {
             if !model.messages.isEmpty { messagesCard }
             if let refusal = model.failsafeRefusal {
                 Label(refusal, systemImage: "exclamationmark.shield.fill")
-                    .font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+                    .font(DesignType.label.font).foregroundStyle(StatusLevel.attention.color).textSelection(.enabled)
             }
             if let actionError {
                 Label(actionError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    .font(DesignType.label.font).foregroundStyle(StatusLevel.problem.color).textSelection(.enabled)
             }
         }
         .onAppear {
@@ -91,12 +91,12 @@ struct ProductionRoutingEditorView: View {
     // MARK: Cards
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Routing and crossovers").font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text("Routing and crossovers").font(DesignType.sectionTitle.font.weight(.semibold))
             Toggle("Use the routing matrix", isOn: Binding(
                 get: { model.configuration.enabled }, set: { model.setEnabled($0) }))
             Text("Each speaker has a source and one to eight ways. Every way has its own output, filters, EQ, trim, polarity and delay.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
         }
     }
 
@@ -126,21 +126,21 @@ struct ProductionRoutingEditorView: View {
                 .labelsHidden()
                 .frame(width: 200)
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
+                VStack(alignment: .trailing, spacing: DesignSpacing.xs.pt) {
                     Text("Choosing a template rebuilds the speakers; outputs are assigned in channel order on the selected device.")
                     Text("Changing outputs or subwoofers restarts the output with a short fade.")
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, DesignSpacing.xs.pt)
         }
     }
 
     private func speakerCard(_ speaker: RoutedSpeaker) -> some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 HStack {
-                    Text(speaker.name.isEmpty ? "Speaker" : speaker.name).font(.headline)
+                    Text(speaker.name.isEmpty ? "Speaker" : speaker.name).font(DesignType.sectionTitle.font)
                     Picker("Source", selection: Binding(
                         get: { speaker.source }, set: { model.setSource($0, speaker: speaker.id) })) {
                         ForEach(model.matrixSources, id: \.self) {
@@ -161,7 +161,7 @@ struct ProductionRoutingEditorView: View {
                         .help(model.removeSpeakerBlockReason(speaker.id) ?? "")
                 }
                 if let reason = model.removeSpeakerBlockReason(speaker.id), speaker.source.kind == .program {
-                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                    Text(reason).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 phaseRow(speaker)
                 RoutingResponsePlot(model: model, speaker: speaker)
@@ -171,7 +171,7 @@ struct ProductionRoutingEditorView: View {
                     Divider()
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, DesignSpacing.xs.pt)
         }
     }
 
@@ -179,7 +179,7 @@ struct ProductionRoutingEditorView: View {
     @ViewBuilder
     private func phaseRow(_ speaker: RoutedSpeaker) -> some View {
         if let choice = model.realisationChoice(speaker) {
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Picker("Crossover phase", selection: Binding<RoutingRealisation?>(
                     get: { choice == .mixed ? nil : (choice == .fir ? .fir : .iir) },
                     set: { if let r = $0 { model.setRealisation(r, speaker: speaker.id) } })) {
@@ -191,8 +191,8 @@ struct ProductionRoutingEditorView: View {
                 if let latency = model.linearPhaseLatency(speaker) {
                     Text(String(format: "Adds %.1f ms", Double(latency.frames) / model.context.sampleRate * 1000)
                          + (latency.twoBand ? " (two-band)" : ""))
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    Text("Plays as minimum phase in low-latency mode").font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).monospacedDigit().foregroundStyle(.secondary)
+                    Text("Plays as minimum phase in low-latency mode").font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }
@@ -204,14 +204,14 @@ struct ProductionRoutingEditorView: View {
                 report(model.addSpeakerOnFreeOutput(selected: engine.selectedOutputDevice))
             }
             Text("A new speaker reads the first program lane no speaker reads, on the next free output.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
     /// E8 A5: the routing's own subwoofers. The profile's subwoofers are edited in the card below this editor.
     private var subwooferCard: some View {
         GroupBox("Subwoofers") {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 ForEach(model.subwooferSpeakers) { sub in
                     HStack {
                         Text(sub.name.isEmpty ? SpeakerRoutingEditorModel.sourceName(sub.source) : sub.name)
@@ -237,7 +237,7 @@ struct ProductionRoutingEditorView: View {
                     Button("Add subwoofer") { report(model.addSubwooferOnFreeOutput(selected: engine.selectedOutputDevice)) }
                         .disabled(model.subwooferAddBlockReason != nil)
                     if let reason = model.subwooferAddBlockReason {
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                        Text(reason).font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -246,9 +246,9 @@ struct ProductionRoutingEditorView: View {
     }
 
     private func wayRow(speaker: RoutedSpeaker, way: RoutedWay) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text(way.name.isEmpty ? "Way" : way.name).font(.subheadline.weight(.semibold))
+                Text(way.name.isEmpty ? "Way" : way.name).font(DesignType.label.font.weight(.semibold))
                 Picker("Output", selection: Binding(
                     get: { way.endpoint },
                     set: { model.setEndpoint($0, way: way.id, speaker: speaker.id) })) {
@@ -261,11 +261,11 @@ struct ProductionRoutingEditorView: View {
                 Button("Remove") { _ = model.removeWay(way.id, speaker: speaker.id) }
                     .disabled(speaker.ways.count < 2)
             }
-            HStack(spacing: 16) {
+            HStack(spacing: DesignSpacing.l.pt) {
                 filterEditor("High-pass", spec: way.highPass, edge: .highPass, speaker: speaker, way: way)
                 filterEditor("Low-pass", spec: way.lowPass, edge: .lowPass, speaker: speaker, way: way)
             }
-            HStack(spacing: 16) {
+            HStack(spacing: DesignSpacing.l.pt) {
                 numberField("Trim dB", value: way.trimDB) { v in
                     model.editWay(way.id, speaker: speaker.id) { $0.trimDB = v }
                 }
@@ -276,7 +276,7 @@ struct ProductionRoutingEditorView: View {
                     get: { way.polarityInverted },
                     set: { v in model.editWay(way.id, speaker: speaker.id) { $0.polarityInverted = v } }))
                 Spacer()
-                Text("EQ sections: \(way.eq.count)").font(.caption).foregroundStyle(.secondary)
+                Text("EQ sections: \(way.eq.count)").font(DesignType.caption.font).foregroundStyle(.secondary)
                 Button("Add EQ") {
                     model.addEQ(RoutingEQSection(type: 0, frequencyHz: 1_000, gainDB: 0, q: 1),
                                 way: way.id, speaker: speaker.id)
@@ -285,8 +285,8 @@ struct ProductionRoutingEditorView: View {
             }
             linearisationRow(way: way)
             ForEach(Array(way.eq.enumerated()), id: \.offset) { index, section in
-                HStack(spacing: 12) {
-                    Text("EQ \(index + 1)").font(.caption).frame(width: 40, alignment: .leading)
+                HStack(spacing: DesignSpacing.m.pt) {
+                    Text("EQ \(index + 1)").font(DesignType.caption.font).frame(width: 40, alignment: .leading)
                     numberField("Hz", value: section.frequencyHz) { v in
                         model.editWay(way.id, speaker: speaker.id) { $0.eq[index].frequencyHz = v }
                     }
@@ -305,10 +305,10 @@ struct ProductionRoutingEditorView: View {
     /// E8 B3: apply, remove and A/B for the way's driver linearisation.
     private func linearisationRow(way: RoutedWay) -> some View {
         let state = model.linearisationState(way.id)
-        return HStack(spacing: 12) {
-            Text("Driver linearisation").font(.caption)
+        return HStack(spacing: DesignSpacing.m.pt) {
+            Text("Driver linearisation").font(DesignType.caption.font)
             Text(state == .active ? "On" : state == .bypassed ? "Bypassed (A)" : "Off")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
             Spacer()
             if state != .none {
                 Picker("A/B", selection: Binding(
@@ -339,7 +339,7 @@ struct ProductionRoutingEditorView: View {
         speaker: RoutedSpeaker, way: RoutedWay
     ) -> some View {
         let fallback = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 1_000)
-        return HStack(spacing: 8) {
+        return HStack(spacing: DesignSpacing.s.pt) {
             Toggle(title, isOn: Binding(
                 get: { spec != nil },
                 set: { on in model.setFilter(on ? fallback : nil, edge: edge, way: way.id, speaker: speaker.id) }))
@@ -369,8 +369,8 @@ struct ProductionRoutingEditorView: View {
     }
 
     private func numberField(_ title: String, value: Double, set: @escaping (Double) -> Void) -> some View {
-        HStack(spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: DesignSpacing.xs.pt) {
+            Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             TextField(title, value: Binding(get: { value }, set: set), format: .number.precision(.fractionLength(0...2)))
                 .textFieldStyle(.roundedBorder).frame(width: 72)
         }
@@ -387,30 +387,30 @@ struct ProductionRoutingEditorView: View {
                         GridRow {
                             Text("")
                             ForEach(Array(outputs.enumerated()), id: \.offset) { _, output in
-                                Text("Out \(output.channelIndex + 1)").font(.caption)
+                                Text("Out \(output.channelIndex + 1)").font(DesignType.caption.font)
                             }
                         }
                         ForEach(Array(model.matrixCells.enumerated()), id: \.offset) { _, row in
                             GridRow {
                                 Text(row.first.map { SpeakerRoutingEditorModel.sourceName($0.source) } ?? "")
-                                    .font(.caption).frame(width: 110, alignment: .leading)
+                                    .font(DesignType.caption.font).frame(width: 110, alignment: .leading)
                                 ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
                                     matrixCell(cell)
                                 }
                             }
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, DesignSpacing.xs.pt)
                 }
                 Text("A dot is a feed from a speaker's way. Type a gain in dB to add a raw feed; clear it to remove.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
     }
 
     private func matrixCell(_ cell: SpeakerRoutingEditorModel.MatrixCell) -> some View {
-        HStack(spacing: 4) {
-            if cell.fedByWay { Image(systemName: "circle.fill").font(.caption2) }
+        HStack(spacing: DesignSpacing.xs.pt) {
+            if cell.fedByWay { Image(systemName: "circle.fill").font(DesignType.caption.font) }
             TextField("", text: Binding(
                 get: { cell.rawGain.map { String(format: "%.1f", 20 * log10(max(1e-6, abs($0)))) } ?? "" },
                 set: { text in
@@ -430,11 +430,11 @@ struct ProductionRoutingEditorView: View {
             programStages: DynamicsLatency.stages(
                 engine.dynamicsConfiguration, sampleRate: model.context.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
         return DisclosureGroup("Pipeline") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 if rows.isEmpty { Text("Nothing is routed yet.").foregroundStyle(.secondary) }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(row.title) (output \(row.output.channelIndex + 1))").font(.headline)
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                        Text("\(row.title) (output \(row.output.channelIndex + 1))").font(DesignType.sectionTitle.font)
                         ForEach(Array(row.steps.enumerated()), id: \.offset) { _, step in
                             HStack(alignment: .firstTextBaseline) {
                                 Text(step.title).frame(width: 90, alignment: .leading)
@@ -445,28 +445,28 @@ struct ProductionRoutingEditorView: View {
                                         .monospacedDigit().foregroundStyle(.secondary)
                                 }
                             }
-                            .font(.callout)
+                            .font(DesignType.label.font)
                         }
                         Text(String(format: "Total latency %.2f ms", row.totalLatencyMilliseconds(sampleRate: model.context.sampleRate)))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 6)
+            .padding(.top, DesignSpacing.s.pt)
         }
     }
 
     private var camillaCard: some View {
         GroupBox("CamillaDSP") {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 HStack {
                     Button("Import YAML…") { importCamilla() }
                     Button("Export YAML…") { exportCamilla() }
                         .disabled(model.configuration.speakers.isEmpty && model.configuration.matrix.isEmpty)
                 }
                 ForEach(Array(interchangeNotes.enumerated()), id: \.offset) { _, note in
-                    Label(note, systemImage: "info.circle").font(.callout)
+                    Label(note, systemImage: "info.circle").font(DesignType.label.font)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -522,9 +522,9 @@ struct ProductionRoutingEditorView: View {
 
     private var messagesCard: some View {
         GroupBox("Checks") {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 ForEach(Array(model.messages.enumerated()), id: \.offset) { _, line in
-                    Label(line, systemImage: "exclamationmark.circle").font(.callout)
+                    Label(line, systemImage: "exclamationmark.circle").font(DesignType.label.font)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -558,7 +558,7 @@ private struct RoutingResponsePlot: View {
             for values in ways { context.stroke(path(values), with: .color(.secondary), lineWidth: 1) }
             context.stroke(path(sum), with: .color(.accentColor), lineWidth: 2)
         }
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
         .accessibilityLabel("Crossover response for \(speaker.name)")
     }
 }

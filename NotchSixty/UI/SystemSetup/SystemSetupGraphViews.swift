@@ -18,22 +18,22 @@ struct SystemSetupGraphView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(graph.title).font(.subheadline.bold())
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text(graph.title).font(DesignType.label.font.bold())
             Canvas { context, size in draw(context: &context, size: size) }
                 .frame(maxWidth: .infinity, minHeight: 150, idealHeight: 180, maxHeight: 200)
-                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
                 .accessibilityLabel(graph.title)
                 .accessibilityValue(graph.curves.map(\.label).joined(separator: ", "))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: 4) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 ForEach(graph.curves) { curve in
-                    HStack(spacing: 4) {
+                    HStack(spacing: DesignSpacing.xs.pt) {
                         Capsule().fill(Self.colour(for: curve)).frame(width: 16, height: 3)
-                        Text(curve.label).font(.caption).lineLimit(2)
+                        Text(curve.label).font(DesignType.caption.font).lineLimit(2)
                     }
                 }
             }
-            Text(graph.caption).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(graph.caption).font(DesignType.caption.font).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -54,7 +54,7 @@ struct SystemSetupGraphView: View {
                 line.move(to: CGPoint(x: plot.minX, y: y(level)))
                 line.addLine(to: CGPoint(x: plot.maxX, y: y(level)))
                 context.stroke(line, with: .color(.secondary.opacity(level == 0 ? 0.5 : 0.18)), lineWidth: level == 0 ? 1 : 0.5)
-                context.draw(Text("\(Int(level))").font(.system(size: 9)).foregroundColor(.secondary),
+                context.draw(Text("\(Int(level))").font(.system(size: DesignType.minimumSize)).foregroundColor(.secondary),
                              at: CGPoint(x: plot.minX - 4, y: y(level)), anchor: .trailing)
             }
             level += 5
@@ -65,7 +65,7 @@ struct SystemSetupGraphView: View {
             line.addLine(to: CGPoint(x: x(hz), y: plot.maxY))
             context.stroke(line, with: .color(.secondary.opacity(0.18)), lineWidth: 0.5)
             let label = hz >= 1_000 ? "\(Int(hz / 1_000))k" : "\(Int(hz))"
-            context.draw(Text(label).font(.system(size: 9)).foregroundColor(.secondary),
+            context.draw(Text(label).font(.system(size: DesignType.minimumSize)).foregroundColor(.secondary),
                          at: CGPoint(x: x(hz), y: plot.maxY + 3), anchor: .top)
         }
         for curve in graph.curves {
@@ -88,7 +88,7 @@ struct SystemSetupGraphPanel: View {
     let emptyNote: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             if let graph {
                 if graph.hasSeatDetail || model.graphDetail == .expert {
                     Picker("Detail", selection: $model.graphDetail) {
@@ -99,7 +99,7 @@ struct SystemSetupGraphPanel: View {
                 }
                 SystemSetupGraphView(graph: graph)
             } else {
-                Text(emptyNote).font(.caption).foregroundStyle(.secondary)
+                Text(emptyNote).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
     }
@@ -113,10 +113,10 @@ struct SystemSetupTermNotes: View {
         let terms = SystemSetupTerm.terms(on: step)
         if !terms.isEmpty {
             GroupBox("In plain words") {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     ForEach(terms) { term in
                         Text("\(Text(term.labelWithName).bold()): \(term.explanation)")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -139,7 +139,7 @@ struct SystemSetupPlacementDiagram: View {
             }
         }
         .frame(width: 200, height: 130)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
         .accessibilityHidden(true)
     }
 
@@ -168,8 +168,8 @@ struct SystemSetupPlacementDiagram: View {
         var level = Path()
         level.move(to: CGPoint(x: 62, y: floorY - 73)); level.addLine(to: CGPoint(x: 126, y: floorY - 74))
         context.stroke(level, with: .color(.accentColor.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-        context.draw(Text("ear height").font(.system(size: 9)).foregroundColor(.secondary), at: CGPoint(x: 150, y: floorY - 60), anchor: .leading)
-        context.draw(Text("points up").font(.system(size: 9)).foregroundColor(.secondary), at: CGPoint(x: 142, y: floorY - 100), anchor: .leading)
+        context.draw(Text("ear height").font(.system(size: DesignType.minimumSize)).foregroundColor(.secondary), at: CGPoint(x: 150, y: floorY - 60), anchor: .leading)
+        context.draw(Text("points up").font(.system(size: DesignType.minimumSize)).foregroundColor(.secondary), at: CGPoint(x: 142, y: floorY - 100), anchor: .leading)
     }
 
     private func drawSeats(_ context: inout GraphicsContext, _ size: CGSize, count: Int) {
@@ -177,14 +177,14 @@ struct SystemSetupPlacementDiagram: View {
         var screen = Path()
         screen.move(to: CGPoint(x: size.width * 0.25, y: 10)); screen.addLine(to: CGPoint(x: size.width * 0.75, y: 10))
         context.stroke(screen, with: .color(.secondary), lineWidth: 3)
-        context.draw(Text("speakers / screen").font(.system(size: 9)).foregroundColor(.secondary), at: CGPoint(x: size.width / 2, y: 20), anchor: .top)
+        context.draw(Text("speakers / screen").font(.system(size: DesignType.minimumSize)).foregroundColor(.secondary), at: CGPoint(x: size.width / 2, y: 20), anchor: .top)
         for (index, mark) in marks.enumerated() {
             let centre = CGPoint(x: mark.x * size.width, y: mark.y * size.height)
             let radius: CGFloat = index == 0 ? 9 : 6
             let shape = Path(ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2))
             context.fill(shape, with: .color(index == 0 ? .accentColor : .secondary))
             if index == 0 {
-                context.draw(Text("main").font(.system(size: 9)).foregroundColor(.secondary), at: CGPoint(x: centre.x, y: centre.y + 12), anchor: .top)
+                context.draw(Text("main").font(.system(size: DesignType.minimumSize)).foregroundColor(.secondary), at: CGPoint(x: centre.x, y: centre.y + 12), anchor: .top)
             }
         }
     }
@@ -198,18 +198,18 @@ struct SystemSetupPlacementGuide: View {
     var body: some View {
         DisclosureGroup("Where to put the microphone and the seats", isExpanded: $expanded) {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 16) { column(.microphone, SystemSetupPlacementGuidance.microphoneLines); column(.seats(count: seatCount), SystemSetupPlacementGuidance.seatLines) }
-                VStack(alignment: .leading, spacing: 12) { column(.microphone, SystemSetupPlacementGuidance.microphoneLines); column(.seats(count: seatCount), SystemSetupPlacementGuidance.seatLines) }
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) { column(.microphone, SystemSetupPlacementGuidance.microphoneLines); column(.seats(count: seatCount), SystemSetupPlacementGuidance.seatLines) }
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) { column(.microphone, SystemSetupPlacementGuidance.microphoneLines); column(.seats(count: seatCount), SystemSetupPlacementGuidance.seatLines) }
             }
-            .padding(.top, 6)
+            .padding(.top, DesignSpacing.s.pt)
         }
     }
 
     private func column(_ kind: SystemSetupPlacementDiagram.Kind, _ lines: [String]) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
             SystemSetupPlacementDiagram(kind: kind)
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(lines, id: \.self) { Text("• \($0)").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                ForEach(lines, id: \.self) { Text("• \($0)").font(DesignType.caption.font).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             .frame(minWidth: 220, maxWidth: 360, alignment: .leading)
         }

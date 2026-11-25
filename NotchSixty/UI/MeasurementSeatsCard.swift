@@ -21,9 +21,9 @@ struct MeasurementSeatsCard<Accessory: View>: View {
     @ViewBuilder var accessory: (MultichannelCalibrationSeat) -> Accessory
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             ForEach(calibration.seats) { seat in
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     if editsDetails, let onUpdate {
                         Toggle("", isOn: Binding(
                             get: { seat.included },
@@ -82,7 +82,7 @@ struct MeasurementSeatsCard<Accessory: View>: View {
                     .disabled(locked || calibration.seats.count >= Int(N60_CALIBRATION_MAX_SEATS))
                 Spacer()
                 Text("Up to \(Int(N60_CALIBRATION_MAX_SEATS)) weighted seats")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
     }

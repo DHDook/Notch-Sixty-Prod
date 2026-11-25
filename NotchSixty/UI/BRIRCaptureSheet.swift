@@ -16,20 +16,20 @@ struct BRIRCaptureSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                Text("Capture your own BRIR").font(.title3.bold())
+                Text("Capture your own BRIR").font(DesignType.sectionTitle.font.bold())
                 Spacer()
                 Text(flow.step.title).foregroundStyle(.secondary)
             }
             content
             if let problem = flow.problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    .font(DesignType.label.font).foregroundStyle(StatusLevel.problem.color).textSelection(.enabled)
             }
             footer
         }
-        .padding(24)
+        .padding(DesignSpacing.xl.pt)
         .frame(minWidth: 520, minHeight: 420)
         .onAppear { microphone.prepareForUse() }
     }
@@ -49,7 +49,7 @@ struct BRIRCaptureSheet: View {
     }
 
     private var microphonesStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Put a small in-ear microphone in each ear, both connected to one audio interface.")
                 .foregroundStyle(.secondary)
             if microphone.permissionStatus != .authorized {
@@ -76,7 +76,7 @@ struct BRIRCaptureSheet: View {
     }
 
     private var speakersStep: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("Which speakers should be captured? Each becomes a virtual speaker.").foregroundStyle(.secondary)
             ForEach(OutputProgramRole.allCases.filter { $0 != .lowFrequencyEffects }) { role in
                 if flow.availableSpeakerRoles.contains(role) {
@@ -94,7 +94,7 @@ struct BRIRCaptureSheet: View {
     }
 
     private var positionsStep: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("Head positions are captured by turning your head, so head tracking can pick the right response.")
                 .foregroundStyle(.secondary)
             Picker("Head positions", selection: $flow.headPositions) {
@@ -109,15 +109,15 @@ struct BRIRCaptureSheet: View {
             }
             .pickerStyle(.segmented)
             Text("\(flow.speakers.count * flow.headPositions.rawValue * flow.headTilt.rawValue) captures, about 10 seconds each.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
     private var compensationStep: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Toggle("Add headphone compensation", isOn: $flow.includeCompensation)
             Text("Measures your headphones with the microphones in your ears over \(BRIRCapturePlan.compensationReseatCount) reseats, so their own response is removed from the result. It plays quietly through the headphones. Do the speaker captures first, then select your headphones as the output.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             if flow.includeCompensation {
                 Toggle("My headphones are selected as the output and are on", isOn: $flow.headphonesConfirmed)
             }
@@ -125,19 +125,19 @@ struct BRIRCaptureSheet: View {
     }
 
     private var captureStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             ProgressView(value: flow.progress)
             Text(flow.prompt)
             if let quality = flow.lastQuality {
                 Text("Last pass: \(quality.snrDB.isFinite ? "\(Int(quality.snrDB.rounded())) dB" : "clean") signal-to-noise, \(quality.clippedSamples) clipped samples")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font.monospacedDigit()).foregroundStyle(.secondary)
             }
             if flow.isCapturing { ProgressView("Capturing…") }
         }
     }
 
     private var reviewStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             TextField("Name", text: $flow.displayName)
             if !flow.results.isEmpty {
                 Picker("Show", selection: $reviewIndex) {
@@ -150,7 +150,7 @@ struct BRIRCaptureSheet: View {
                     .frame(height: 140)
             }
             Text("\(flow.results.count) responses\(flow.includeCompensation ? " with headphone compensation" : ""), \(flow.tapCount) taps at \(flow.sampleRate / 1000, specifier: "%.1f") kHz.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
@@ -200,7 +200,7 @@ private struct BRIRPlot: View {
                 context.stroke(path, with: .color(color), lineWidth: 1.5)
             }
         }
-        .background(.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+        .background(.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
         .accessibilityLabel("Left and right ear impulse response, level against time")
     }
 }

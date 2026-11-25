@@ -7,10 +7,10 @@ struct SystemSetupVerifyStep: View {
     @ObservedObject var model: SystemSetupFlowModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Check the result").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Check the result").font(DesignType.sectionTitle.font)
             Text("Notch Sixty measures your main seat once more with the correction on and compares it with what was predicted.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             HStack {
                 Button("Verify") { model.runVerification() }.disabled(model.isVerifying)
                 if model.isVerifying {
@@ -20,8 +20,8 @@ struct SystemSetupVerifyStep: View {
             }
             if let summary = model.verificationSummary {
                 Label(summary.headline, systemImage: summary.verdict == .verified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                    .font(.headline)
-                Text(summary.detail).font(.callout).foregroundStyle(.secondary)
+                    .font(DesignType.sectionTitle.font)
+                Text(summary.detail).font(DesignType.label.font).foregroundStyle(.secondary)
             }
             if let report = model.verificationReport {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
@@ -42,19 +42,19 @@ struct SystemSetupVerifyStep: View {
 
     private var roomInsightsCard: some View {
         GroupBox("Room insights") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 if model.roomInsights.isEmpty {
-                    Text("Nothing here that EQ cannot handle.").font(.callout).foregroundStyle(.secondary)
+                    Text("Nothing here that EQ cannot handle.").font(DesignType.label.font).foregroundStyle(.secondary)
                 }
                 ForEach(model.roomInsights) { insight in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(insight.title).font(.callout.weight(insight.isImportant ? .semibold : .regular))
-                        Text(insight.detail).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                        Text(insight.title).font(DesignType.label.font.weight(insight.isImportant ? .semibold : .regular))
+                        Text(insight.detail).font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
-                Text("After you save, the summary links to the full Room advisor.").font(.caption).foregroundStyle(.secondary)
+                Text("After you save, the summary links to the full Room advisor.").font(DesignType.caption.font).foregroundStyle(.secondary)
             }
-            .padding(4)
+            .padding(DesignSpacing.xs.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

@@ -6,7 +6,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 SystemCapabilityNoteCard(
                     title: "Your speaker arrangement", features: SystemCapabilityText.advisorFeatures,
@@ -37,10 +37,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                         systemImage:
                             "exclamationmark.triangle.fill"
                     )
-                    .font(.callout)
-                    .foregroundStyle(.red)
+                    .font(DesignType.label.font)
+                    .foregroundStyle(StatusLevel.problem.color)
                     .textSelection(.enabled)
-                    .padding(14)
+                    .padding(DesignSpacing.l.pt)
                     .frame(
                         maxWidth: .infinity,
                         alignment: .leading
@@ -63,7 +63,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text(
                     "Occasional measurement-guided advice for placement, physical treatment, DSP and active acoustics."
                 )
@@ -71,11 +71,11 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             }
             Spacer()
             Text("READ-ONLY TOOL")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
+                .padding(.horizontal, DesignSpacing.m.pt)
+                .padding(.vertical, DesignSpacing.s.pt)
                 .glassEffect(.regular, in: .capsule)
         }
     }
@@ -104,34 +104,34 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             speaker: advisor.unifiedSpeakerComparison,
             physicalSub: advisor.physicalSubComparison
         )
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Label(
                     "Acoustic Intelligence · Recommended Sequence",
                     systemImage: "waveform.path.ecg.rectangle"
                 )
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
                 Spacer()
                 Text("REVIEW ONLY")
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
             }
             Text(
                 "Combines selected room findings into physical-first advice. Speaker Optimizer baselines require explicit selection and verified playback/route identity. Physical Sub comparisons appear only after the existing before/after measurement workflow approves them."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 HStack {
                     Text("Source-specific speaker evidence")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Spacer()
                     Button("Find baselines") {
                         advisor.refreshUnifiedSpeakerBaselines()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                 }
                 Picker(
                     "Qualified baseline",
@@ -159,60 +159,60 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 Button("Review selected baseline") {
                     advisor.reviewUnifiedSpeakerBaseline()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(advisor.unifiedSpeakerBaselineID == nil)
                 if let selected {
                     Text(
                         "Explicitly selected route: " + selected.routingSignature
                         + " · Microphone: " + selected.microphone.deviceUID
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 }
                 if let status = advisor.unifiedSpeakerMessage {
                     Text(status)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 if let comparison = advisor.unifiedSpeakerComparison {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         Text("Verified-source candidate tradeoffs · visual review only")
-                            .font(.subheadline.bold())
+                            .font(DesignType.label.font.bold())
                         Text(
                             "All alternatives use the same explicitly selected qualified Speaker Optimizer baseline. Target error, headroom, seat regression and FIR group delay are modeled—not measured post-correction."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         ForEach(comparison.sources.indices, id: \.self) { row in
                             let source = comparison.sources[row]
                             Text(source.source.displayName)
-                                .font(.subheadline.bold())
+                                .font(DesignType.label.font.bold())
                             ForEach(source.alternatives.indices, id: \.self) { ix in
                                 let alternative = source.alternatives[ix]
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                                    HStack(spacing: DesignSpacing.m.pt) {
                                         Text(alternative.kind.rawValue.uppercased())
-                                            .font(.caption.bold())
+                                            .font(DesignType.caption.font.bold())
                                         Text(
                                             String(
                                                 format: "Target RMSE: %.2f dB",
                                                 alternative.predictedWeightedRMSEAfterDB
                                             )
                                         )
-                                        .font(.caption.monospacedDigit())
+                                        .font(DesignType.caption.font.monospacedDigit())
                                         Spacer(minLength: 4)
                                         Text(
                                             alternative.eligibleForVisualPreview
                                                 ? "Preview eligible" : "Blocked"
                                         )
-                                        .font(.caption.bold())
+                                        .font(DesignType.caption.font.bold())
                                         .foregroundStyle(
                                             alternative.eligibleForVisualPreview
                                                 ? Color.secondary : Color.orange
                                         )
                                     }
-                                    HStack(spacing: 12) {
+                                    HStack(spacing: DesignSpacing.m.pt) {
                                         Text(
                                             String(format: "Headroom +%.2f dB", alternative.requiredHeadroomDB)
                                         )
@@ -225,25 +225,25 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                                             } ?? "No declared fixed FIR delay"
                                         )
                                     }
-                                    .font(.caption.monospacedDigit())
+                                    .font(DesignType.caption.font.monospacedDigit())
                                     .foregroundStyle(.secondary)
                                     ForEach(alternative.blockingReasons, id: \.self) { warning in
                                         Text("• " + warning)
-                                            .font(.caption)
-                                            .foregroundStyle(.orange)
+                                            .font(DesignType.caption.font)
+                                            .foregroundStyle(StatusLevel.attention.color)
                                     }
                                 }
-                                .padding(9)
+                                .padding(DesignSpacing.s.pt)
                                 .background(.secondary.opacity(0.055),
-                                            in: RoundedRectangle(cornerRadius: 9))
+                                            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
                             }
                         }
                     }
                 }
                 if let sub = advisor.physicalSubComparison {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Physical Sub placement · measured multi-seat LF spread")
-                            .font(.subheadline.bold())
+                            .font(DesignType.label.font.bold())
                         Text(
                             String(
                                 format: "Before: %.2f dB RMS · After: %.2f dB RMS · Improvement: %.2f dB across %d seats",
@@ -253,18 +253,18 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                                 sub.seatCount
                             )
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         Text(
                             "Other objectives: target error unavailable · decay unavailable · headroom unavailable · coherent phase/timing unavailable · added latency unavailable. No physical routing changes are authorized."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                 } else {
                     Text(
                         "For measured Sub placement tradeoffs, use the existing verified before/after placement comparison. Coordinated multi-Sub timing additionally requires independent output mapping and a common phase reference."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
             }
@@ -273,25 +273,25 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 Text(
                     "No recommendation is available for this project. Capture and include room measurements first."
                 )
-                .font(.subheadline)
+                .font(DesignType.label.font)
             } else {
                 ForEach(summary.advice.indices, id: \.self) { index in
                     let item = summary.advice[index]
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                         Text("\(index + 1)")
-                            .font(.subheadline.bold().monospacedDigit())
+                            .font(DesignType.label.font.bold().monospacedDigit())
                             .frame(width: 24, height: 24)
                             .background(.secondary.opacity(0.12), in: Circle())
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             Text(item.title)
-                                .font(.subheadline.bold())
+                                .font(DesignType.label.font.bold())
                             Text(item.rationale)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             ForEach(item.blockers, id: \.self) { blocker in
                                 Label(blocker, systemImage: "exclamationmark.shield")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
+                                    .font(DesignType.caption.font)
+                                    .foregroundStyle(StatusLevel.attention.color)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -306,24 +306,24 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 Divider()
                 ForEach(summary.warnings, id: \.self) { warning in
                     Label(warning, systemImage: "info.circle")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
             Text(
                 "Modeled recommendations are not verified acoustic improvements. No EQ, room correction, speaker delays or Sub routing can be applied here."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var workflowCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             Text("Workflow")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
             HStack(spacing: 0) {
                 workflowStep(
                     number: 1,
@@ -357,10 +357,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 )
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
@@ -377,10 +377,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
         detail: String,
         active: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 Text("\(number)")
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .frame(width: 24, height: 24)
                     .background(
                         active
@@ -393,10 +393,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                         in: Circle()
                     )
                 Text(title)
-                    .font(.subheadline.bold())
+                    .font(DesignType.label.font.bold())
             }
             Text(detail)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(
                     horizontal: false,
@@ -407,15 +407,15 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
     }
 
     private var measurementSourceCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Measurement Source")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Advisor selection is independent of the current Content Preset and Playback System."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -427,7 +427,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                         systemImage: "arrow.clockwise"
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
 
             Picker(
@@ -449,19 +449,19 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             }
             .frame(maxWidth: 520)
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
     private func readinessCard(
         _ report: RoomTreatmentAdvisorReport
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             Text("Measurement Readiness")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
 
             LazyVGrid(
                 columns: [
@@ -501,42 +501,42 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
             if !report.qualityWarnings.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Label(
                         "Measurement warnings",
                         systemImage:
                             "exclamationmark.triangle"
                     )
-                    .font(.subheadline.bold())
+                    .font(DesignType.label.font.bold())
                     ForEach(
                         report.qualityWarnings,
                         id: \.self
                     ) { warning in
                         Text("• \(warning)")
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
     private func actionPlanCard(
         _ report: RoomTreatmentAdvisorReport
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text("Recommended Order")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Text(
                     "Priorities combine severity, confidence and measurement readiness. Nothing is applied automatically."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
 
@@ -546,20 +546,20 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             ) { index in
                 let priority =
                     report.actionPriorities[index]
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     Text("\(index + 1)")
-                        .font(.headline.monospacedDigit())
+                        .font(DesignType.sectionTitle.font.monospacedDigit())
                         .frame(width: 30, height: 30)
                         .background(
                             Color.accentColor.opacity(0.12),
                             in: Circle()
                         )
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text(priority.remedy.displayName)
-                            .font(.subheadline.bold())
+                            .font(DesignType.label.font.bold())
                         Text(priority.rationale)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(
                                 horizontal: false,
@@ -575,32 +575,32 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 }
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
     private func findingsSection(
         _ report: RoomTreatmentAdvisorReport
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Diagnosis & Recommendations")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Measured evidence is kept separate from interpretation and advice."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(
                     "\(report.findings.count) FINDING\(report.findings.count == 1 ? "" : "S")"
                 )
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
             }
@@ -614,21 +614,21 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
     private func findingCard(
         _ finding: RoomTreatmentAdvisorFinding
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                 Image(
                     systemName:
                         findingIcon(finding)
                 )
-                .font(.title3)
+                .font(DesignType.sectionTitle.font)
                 .frame(width: 26)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text(finding.title)
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "\(Int((finding.confidence * 100).rounded()))% advisory confidence"
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -636,10 +636,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                     finding.primaryRemedy
                         .displayName.uppercased()
                 )
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(0.7)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
+                .padding(.horizontal, DesignSpacing.s.pt)
+                .padding(.vertical, DesignSpacing.xs.pt)
                 .glassEffect(.regular, in: .capsule)
             }
 
@@ -657,20 +657,20 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             )
 
             if !finding.secondaryRemedies.isEmpty {
-                HStack(spacing: 7) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Text("Also consider")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     ForEach(
                         finding.secondaryRemedies
                     ) { remedy in
                         Text(remedy.displayName)
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                             .padding(
                                 .horizontal,
                                 8
                             )
-                            .padding(.vertical, 4)
+                            .padding(.vertical, DesignSpacing.xs.pt)
                             .background(
                                 .secondary.opacity(0.08),
                                 in: Capsule()
@@ -679,10 +679,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 }
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .background(
             .secondary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 16)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -697,39 +697,39 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
         ) {
             GridRow {
                 Text(label)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
                     .frame(
                         width: 72,
                         alignment: .leading
                     )
                 Text(text)
-                    .font(.callout)
+                    .font(DesignType.label.font)
             }
         }
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Label(
                 "No saved room measurements",
                 systemImage:
                     "waveform.badge.magnifyingglass"
             )
-            .font(.headline)
+            .font(DesignType.sectionTitle.font)
             Text(
                 "Use Speaker Calibration / Room Correction to capture at least one room sweep. Then return here and reload. A single movable measurement microphone is the expected workflow."
             )
             .foregroundStyle(.secondary)
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .frame(
             maxWidth: .infinity,
             alignment: .leading
         )
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
@@ -738,9 +738,9 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             "Room Advisor never applies EQ, changes a preset, selects a Playback System, or arms Active Room Treatment. Recommendations remain advisory until you deliberately use the corresponding workflow.",
             systemImage: "lock.shield"
         )
-        .font(.caption)
+        .font(DesignType.caption.font)
         .foregroundStyle(.secondary)
-        .padding(.top, 2)
+        .padding(.top, DesignSpacing.xs.pt)
     }
 
     private func metric(
@@ -748,21 +748,21 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
         value: String,
         detail: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.title3.bold())
+                .font(DesignType.sectionTitle.font.bold())
             Text(detail)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(
                     horizontal: false,
                     vertical: true
                 )
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(
             maxWidth: .infinity,
             minHeight: 105,
@@ -770,7 +770,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
         )
         .background(
             .secondary.opacity(0.06),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 

@@ -32,15 +32,15 @@ struct ProductionRoomGeometrySection: View {
     @State private var confirmsActualPlacementMove = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Geometry & Placement")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Optional room model. Geometry predicts; measurements decide whether the prediction is actually present."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -68,7 +68,7 @@ struct ProductionRoomGeometrySection: View {
                         systemImage:
                             "exclamationmark.triangle"
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
 
@@ -90,32 +90,32 @@ struct ProductionRoomGeometrySection: View {
                             $showsAdvancedPredictions
                     ) {
                         detailedPredictions(analysis)
-                            .padding(.top, 10)
+                            .padding(.top, DesignSpacing.m.pt)
                     }
                 }
 
                 geometryActions
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
     private var emptyGeometryState: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Label(
                 "No room geometry saved for this measurement project",
                 systemImage: "square.resize"
             )
-            .font(.subheadline.bold())
+            .font(DesignType.label.font.bold())
 
             Text(
                 "Add dimensions and speaker/listener positions to test room-mode, first-reflection and boundary-interference hypotheses. The template is only a starting point—replace every value with the real room."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             Button {
@@ -126,17 +126,17 @@ struct ProductionRoomGeometrySection: View {
                     systemImage: "plus"
                 )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .disabled(advisor.selectedProjectID == nil)
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(
             maxWidth: .infinity,
             alignment: .leading
         )
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -144,17 +144,17 @@ struct ProductionRoomGeometrySection: View {
     // PR110: optional project-only experiment settings. Nothing in this card
     // moves real speakers, changes the Playback System, or applies DSP.
     private var advancedPlacementSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Advanced Speaker & Subwoofer Placement")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
             Text(
                 "Read-only physical experiments. A proposed toe-in, height, speaker or Sub move needs real microphone verification before treating it as an improvement."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             if let settings = advisor.advancedPlacementDraft {
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     toeInField("Left toe-in (°)", side: .left,
                                value: settings.leftToeInDegrees)
                     toeInField("Right toe-in (°)", side: .right,
@@ -163,7 +163,7 @@ struct ProductionRoomGeometrySection: View {
 
                 HStack {
                     Text("Additional listening seats")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     Spacer()
                     Button("Add Seat") {
                         advisor.addAdvancedSeat()
@@ -182,7 +182,7 @@ struct ProductionRoomGeometrySection: View {
 
                 HStack {
                     Text("Modeled physical Sub positions")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     Spacer()
                     Button("Add Sub") {
                         advisor.addAdvancedSubwoofer()
@@ -199,7 +199,7 @@ struct ProductionRoomGeometrySection: View {
                     )
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Save Advanced Placement") {
                         advisor.saveAdvancedPlacement()
                     }
@@ -217,61 +217,61 @@ struct ProductionRoomGeometrySection: View {
                         advisor.advancedPlacementHasUnsavedChanges
                         ? "UNSAVED DRAFT" : "SAVED"
                     )
-                    .font(.caption2.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
                 }
                 if advisor.geometryHasUnsavedChanges {
                     Text("Save your actual room geometry before saving advanced coordinates.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 if let message = advisor.advancedPlacementMessage {
                     Label(message, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(StatusLevel.attention.color)
                 }
 
                 if !advisor.advancedPlacementExperiments.isEmpty {
                     Divider()
                     Text("Physical experiments to consider")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     Text(
                         "Each experiment changes one variable. Preview does not change either draft or saved geometry."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     ForEach(advisor.advancedPlacementExperiments) { proposal in
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: DesignSpacing.s.pt) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 Text(proposal.description)
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                 Text(proposal.evidenceLabel)
-                                    .font(.caption2)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button("Inspect") {
                                 advisor.previewAdvancedExperiment(proposal)
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                         }
                     }
                 }
 
                 Divider()
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text("Measurement-Informed Toe-In")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     Text(
                         "Review existing repeat-qualified on/off-axis Lab sweeps for this Playback System. Positive signed rotation points toward the right room wall (+X), negative toward the left. In-room benefit is not predicted."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     Toggle(
                         "I confirm the saved speaker positions and angles match the physical arrangement during these Lab captures",
                         isOn: $confirmsUnchangedLabGeometry
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     Button("Inspect Latest Qualified Lab Directivity") {
                         advisor.inspectRecentDirectivity(
                             physicalGeometryMatchesCapture:
@@ -284,19 +284,19 @@ struct ProductionRoomGeometrySection: View {
                         || advisor.advancedPlacementHasUnsavedChanges
                         || advisor.savedAdvancedPlacement == nil
                     )
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     if let message = advisor.toeInEvidenceMessage {
                         Text(message)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                     ForEach(
                         advisor.toeInMeasurementEvidence,
                         id: \.experimentID
                     ) { result in
-                        VStack(alignment: .leading, spacing: 3) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             Text(result.experimentID)
-                                .font(.caption.bold())
+                                .font(DesignType.caption.font.bold())
                             if result.status == .measuredComparison,
                                let change = result.indicatedSpectralChangeDB {
                                 Text(
@@ -306,42 +306,42 @@ struct ProductionRoomGeometrySection: View {
                                         change
                                     )
                                 )
-                                .font(.caption.monospacedDigit())
+                                .font(DesignType.caption.font.monospacedDigit())
                             } else {
                                 Text("INCONCLUSIVE · insufficient angular or frequency coverage")
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                             }
                             Text(result.note)
-                                .font(.caption2)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(8)
+                        .padding(DesignSpacing.s.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
                             .secondary.opacity(0.04),
-                            in: RoundedRectangle(cornerRadius: 8)
+                            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                         )
                     }
                 }
 
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text("Multi-Seat Subwoofer A/B")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     Text(
                         "Compare two ACTUAL physical Sub placements at the same microphone seats. The diagnostic is measured 35–160 Hz inter-seat variation, not predicted output level or a subwoofer delay adjustment."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     Button("Find Stored Subwoofer Sweeps") {
                         confirmsFixedSubABSeatsAndChain = false
                         advisor.refreshPhysicalSubMeasurementSets()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     if advisor.availablePhysicalSubSets.isEmpty {
                         Text("No local Sub capture sets selected. Collect three repeated sweeps per seat for both physical positions before comparing.")
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     } else {
                         Picker(
@@ -381,14 +381,14 @@ struct ProductionRoomGeometrySection: View {
                         "I confirm the physical Sub was moved exactly as inspected; all microphone seats, crossover, gain, phase, routing and DSP settings were unchanged",
                         isOn: $confirmsFixedSubABSeatsAndChain
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     Button("Compare Measured Sub Positions") {
                         advisor.comparePhysicalSubPlacement(
                             identicalSeatsAndUnchangedSignalChainConfirmed:
                                 confirmsFixedSubABSeatsAndChain
                         )
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(
                         !confirmsFixedSubABSeatsAndChain
                             || advisor.physicalSubBaselineID == nil
@@ -406,34 +406,34 @@ struct ProductionRoomGeometrySection: View {
                                 result.reductionInInterseatSpreadDB
                             )
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         Text(
                             "\(result.seatCount) seats · \(result.commonFrequencyPointCount) shared frequency samples · \(Int(result.commonLowHz))–\(Int(result.commonHighHz)) Hz · measurement only"
                         )
-                        .font(.caption2)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     if let message = advisor.physicalSubComparisonMessage {
                         Text(message)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text("Placement Verification & History")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     Text(
                         "Record one physically performed experiment. Only repeat-qualified, matching before/after Sub sweeps can receive a measured lower/higher LF-variation outcome. Every other move remains inconclusive."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     Toggle(
                         "I physically performed the inspected move and verified its position",
                         isOn: $confirmsActualPlacementMove
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     Button("Record Placement Review") {
                         advisor.recordPlacementReview(
                             physicalMoveConfirmed: confirmsActualPlacementMove,
@@ -442,7 +442,7 @@ struct ProductionRoomGeometrySection: View {
                         )
                         confirmsActualPlacementMove = false
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(
                         !confirmsActualPlacementMove
                         || advisor.selectedAdvancedExperiment == nil
@@ -453,28 +453,28 @@ struct ProductionRoomGeometrySection: View {
                     Text(
                         "Reviews are immutable evidence snapshots. Recording does not accept, save or apply a new speaker/sub position."
                     )
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     if let message = advisor.placementReviewMessage {
                         Text(message)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                     if !advisor.placementReviewHistory.isEmpty {
                         Text(
                             "Saved project reviews (\(advisor.placementReviewHistory.count))"
                         )
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         ForEach(Array(advisor.placementReviewHistory.suffix(20).reversed())) { record in
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 Text(record.outcome.displayName)
-                                    .font(.caption.bold())
+                                    .font(DesignType.caption.font.bold())
                                 Text(record.experimentDescription)
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                 Text(
                                     record.reviewedAt.formatted(date: .abbreviated, time: .shortened)
                                 )
-                                .font(.caption2)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                                 if let delta = record.measuredSpreadReductionDB {
                                     Text(
@@ -484,70 +484,70 @@ struct ProductionRoomGeometrySection: View {
                                             record.measuredSeatCount ?? 0
                                         )
                                     )
-                                    .font(.caption.monospacedDigit())
+                                    .font(DesignType.caption.font.monospacedDigit())
                                 }
                                 if let before = record.baselineMeasurementSetID {
                                     Text("Baseline capture: \(before.uuidString)")
-                                        .font(.caption2.monospaced())
+                                        .font(DesignType.caption.font.monospaced())
                                 }
                                 if let after = record.candidateMeasurementSetID {
                                     Text("Candidate capture: \(after.uuidString)")
-                                        .font(.caption2.monospaced())
+                                        .font(DesignType.caption.font.monospaced())
                                 }
                                 Text(record.evidenceNote)
-                                    .font(.caption2)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                                 Text("NOT hardware accepted · NOT deployed")
-                                    .font(.caption2.bold())
+                                    .font(DesignType.caption.font.bold())
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(9)
+                            .padding(DesignSpacing.s.pt)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
                                 .secondary.opacity(0.04),
-                                in: RoundedRectangle(cornerRadius: 8)
+                                in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                             )
                         }
                     }
                 }
 
                 if let proposal = advisor.selectedAdvancedExperiment {
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Hypothetical trial: \(proposal.description)")
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         Text(
                             "This is not a measurement or an accepted placement. Physically test one change, then repeat matched sweeps before recording the actual location."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         Text("Left: \(formatAdvancedPoint(proposal.trial.room.leftSpeaker))")
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                         Text("Right: \(formatAdvancedPoint(proposal.trial.room.rightSpeaker))")
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                         Text(
                             "Toe-in: L \(proposal.trial.leftToeInDegrees.formatted())°, R \(proposal.trial.rightToeInDegrees.formatted())°"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         ForEach(proposal.trial.subwooferPositions.indices, id: \.self) {
                             index in
                             Text(
                                 "Sub \(index + 1): \(formatAdvancedPoint(proposal.trial.subwooferPositions[index]))"
                             )
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                         }
                     }
-                    .padding(10)
+                    .padding(DesignSpacing.m.pt)
                     .background(
                         .secondary.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 9)
+                        in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                     )
                 }
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .background(
             .secondary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
         .onChange(of: advisor.selectedProjectID) { _, _ in
             confirmsUnchangedLabGeometry = false
@@ -583,9 +583,9 @@ struct ProductionRoomGeometrySection: View {
         side: RoomGeometrySpeaker,
         value: Double
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption)
+                .font(DesignType.caption.font)
             TextField(
                 title,
                 value: Binding(
@@ -611,9 +611,9 @@ struct ProductionRoomGeometrySection: View {
         isSubwoofer: Bool,
         index: Int
     ) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DesignSpacing.s.pt) {
             Text(label)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .frame(width: 56, alignment: .leading)
             coordinateEditor("X", \.x, isSubwoofer: isSubwoofer, index: index)
             coordinateEditor("Y", \.y, isSubwoofer: isSubwoofer, index: index)
@@ -636,9 +636,9 @@ struct ProductionRoomGeometrySection: View {
         isSubwoofer: Bool,
         index: Int
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(axis)
-                .font(.caption2)
+                .font(DesignType.caption.font)
             TextField(
                 axis,
                 value: Binding(
@@ -678,19 +678,19 @@ struct ProductionRoomGeometrySection: View {
     }
 
     private var geometryEditor: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Room Model")
-                    .font(.subheadline.bold())
+                    .font(DesignType.label.font.bold())
                 Spacer()
                 if advisor.geometryHasUnsavedChanges {
                     Text("UNSAVED")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(0.7)
                         .foregroundStyle(.secondary)
                 } else if advisor.savedGeometry != nil {
                     Text("SAVED")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(0.7)
                         .foregroundStyle(.secondary)
                 }
@@ -735,7 +735,7 @@ struct ProductionRoomGeometrySection: View {
             Text(
                 "Coordinates: X runs left wall → right wall, Y front wall → rear wall, Z floor → ceiling."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
     }
@@ -749,20 +749,20 @@ struct ProductionRoomGeometrySection: View {
             )
         ]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(title)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 ForEach(
                     Array(fields.enumerated()),
                     id: \.offset
                 ) { item in
                     let field = item.element
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text(field.0)
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
 
                         TextField(
@@ -781,9 +781,9 @@ struct ProductionRoomGeometrySection: View {
                 }
 
                 Text(unit.title)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
-                    .padding(.top, 18)
+                    .padding(.top, DesignSpacing.l.pt)
 
                 Spacer()
             }
@@ -813,7 +813,7 @@ struct ProductionRoomGeometrySection: View {
     }
 
     private var geometryActions: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DesignSpacing.m.pt) {
             Button {
                 advisor.saveGeometry()
             } label: {
@@ -822,7 +822,7 @@ struct ProductionRoomGeometrySection: View {
                     systemImage: "square.and.arrow.down"
                 )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .disabled(
                 advisor.geometryDraft == nil
                     || advisor.geometryAnalysis == nil
@@ -837,7 +837,7 @@ struct ProductionRoomGeometrySection: View {
                         systemImage: "arrow.uturn.backward"
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(
                     !advisor.geometryHasUnsavedChanges
                 )
@@ -850,7 +850,7 @@ struct ProductionRoomGeometrySection: View {
                         systemImage: "trash"
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
 
             Spacer()
@@ -859,7 +859,7 @@ struct ProductionRoomGeometrySection: View {
                 "Prediction only · verify by re-measuring",
                 systemImage: "ruler"
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
     }
@@ -867,37 +867,37 @@ struct ProductionRoomGeometrySection: View {
     private func evidenceCard(
         _ analysis: RoomGeometryAnalysis
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Geometry × Measurement")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
 
             ForEach(analysis.evidence.prefix(8)) {
                 evidence in
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     Text(evidence.status.displayName.uppercased())
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(0.6)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, DesignSpacing.s.pt)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                         .background(
                             .secondary.opacity(0.09),
                             in: Capsule()
                         )
                         .frame(width: 88)
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text(evidence.title)
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                         Text(evidence.prediction)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                         if let measurement =
                             evidence.measurement {
                             Text(measurement)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         }
                         Text(evidence.rationale)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(
                                 horizontal: false,
@@ -908,25 +908,25 @@ struct ProductionRoomGeometrySection: View {
                 }
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .background(
             .secondary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
     private func placementCard(
         _ analysis: RoomGeometryAnalysis
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Placement Experiments")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
 
             if analysis.placementCandidates.isEmpty {
                 Text(
                     "No nearby candidate materially improves the current geometry-risk score. This does not prove the current placement is optimal; it only means the bounded PR93 search did not find a useful simple move."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             } else {
                 ForEach(
@@ -936,7 +936,7 @@ struct ProductionRoomGeometrySection: View {
                 ) { index in
                     let candidate =
                         analysis.placementCandidates[index]
-                    HStack(alignment: .top, spacing: 11) {
+                    HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                         Text("\(index + 1)")
                             .font(
                                 .headline
@@ -949,10 +949,10 @@ struct ProductionRoomGeometrySection: View {
                                 in: Circle()
                             )
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             HStack {
                                 Text(candidate.title)
-                                    .font(.callout.bold())
+                                    .font(DesignType.label.font.bold())
                                 Text(
                                     String(
                                         format:
@@ -961,15 +961,15 @@ struct ProductionRoomGeometrySection: View {
                                             .expectedImprovementPercent
                                     )
                                 )
-                                .font(.caption.bold())
+                                .font(DesignType.caption.font.bold())
                                 .foregroundStyle(.secondary)
                             }
 
                             Text(candidate.detail)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
 
                             Text(candidate.rationale)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(
                                     horizontal: false,
@@ -1002,7 +1002,7 @@ struct ProductionRoomGeometrySection: View {
                                     "eye"
                             )
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .help(
                             "Load this predicted placement into the room-model draft. This does not change playback or move hardware."
                         )
@@ -1021,22 +1021,22 @@ struct ProductionRoomGeometrySection: View {
                     systemImage:
                         "checkmark.seal"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
-                .padding(.top, 4)
+                .padding(.top, DesignSpacing.xs.pt)
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .background(
             .secondary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
     private var placementVerificationCard: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("Verify a Placement Change")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
 
             verificationStep(
                 1,
@@ -1059,14 +1059,14 @@ struct ProductionRoomGeometrySection: View {
                 "The saved room model records where the hardware actually is; it does not apply a DSP setting.",
                 systemImage: "ruler"
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
-            .padding(.top, 2)
+            .padding(.top, DesignSpacing.xs.pt)
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .background(
             .secondary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1074,16 +1074,16 @@ struct ProductionRoomGeometrySection: View {
         _ number: Int,
         _ text: String
     ) -> some View {
-        HStack(alignment: .top, spacing: 9) {
+        HStack(alignment: .top, spacing: DesignSpacing.s.pt) {
             Text("\(number)")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .frame(width: 22, height: 22)
                 .background(
                     .secondary.opacity(0.09),
                     in: Circle()
                 )
             Text(text)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .fixedSize(
                     horizontal: false,
                     vertical: true
@@ -1124,7 +1124,7 @@ struct ProductionRoomGeometrySection: View {
     private func detailedPredictions(
         _ analysis: RoomGeometryAnalysis
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             predictionGroup(
                 title: "Lowest Room Modes",
                 rows:
@@ -1179,9 +1179,9 @@ struct ProductionRoomGeometrySection: View {
         title: String,
         rows: [String]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             ForEach(rows, id: \.self) { row in
                 Text(row)
@@ -1201,13 +1201,13 @@ private struct GeometryRoomPlanView: View {
     var analysis: RoomGeometryAnalysis
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
                 Text("Top-Down Room Plan")
-                    .font(.subheadline.bold())
+                    .font(DesignType.label.font.bold())
                 Spacer()
                 Text("FRONT WALL")
-                    .font(.caption2.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.6)
                     .foregroundStyle(.secondary)
             }
@@ -1243,7 +1243,7 @@ private struct GeometryRoomPlanView: View {
                 )
 
                 ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                         .stroke(
                             .secondary.opacity(0.55),
                             lineWidth: 1.5
@@ -1306,7 +1306,7 @@ private struct GeometryRoomPlanView: View {
                 }
             }
 
-            HStack(spacing: 14) {
+            HStack(spacing: DesignSpacing.l.pt) {
                 Label(
                     "L/R speakers",
                     systemImage: "hifispeaker.fill"
@@ -1320,13 +1320,13 @@ private struct GeometryRoomPlanView: View {
                     systemImage: "circle.fill"
                 )
             }
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .background(
             .secondary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 13)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1358,7 +1358,7 @@ private struct GeometryRoomPlanView: View {
         roomHeight: CGFloat
     ) -> some View {
         Text(label)
-            .font(.caption2.bold())
+            .font(DesignType.caption.font.bold())
             .frame(width: 26, height: 26)
             .background(
                 .regularMaterial,
@@ -1388,7 +1388,7 @@ private struct GeometryRoomPlanView: View {
         roomHeight: CGFloat
     ) -> some View {
         Image(systemName: "person.fill")
-            .font(.caption)
+            .font(DesignType.caption.font)
             .frame(width: 28, height: 28)
             .background(
                 .regularMaterial,

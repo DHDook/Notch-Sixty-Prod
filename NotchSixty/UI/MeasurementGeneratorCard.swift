@@ -15,7 +15,7 @@ struct MeasurementGeneratorCard: View {
 
     var body: some View {
         GroupBox("Signal generator") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Picker("Signal", selection: $settings.kind) {
                     Text("White").tag(SignalGeneratorSettings.Kind.white)
                     Text("Pink").tag(SignalGeneratorSettings.Kind.pink)
@@ -38,23 +38,23 @@ struct MeasurementGeneratorCard: View {
                         }
                     }
                     Text("Band \(Int(settings.lowHz)) to \(Int(settings.highHz)) Hz")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 Toggle("Mute other audio while playing", isOn: $settings.muteOtherAudio)
                 HStack {
                     Button(controller.isPlaying ? "Stop" : "Play") { controller.toggle(settings) }
                     if let left = controller.secondsRemaining {
                         Text("Stops in \(left / 60):\(String(format: "%02d", left % 60))")
-                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).monospacedDigit().foregroundStyle(.secondary)
                     }
                 }
                 if let message = controller.message {
-                    Text(message).font(.caption).foregroundStyle(.orange)
+                    Text(message).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                 }
                 Text("Level is held at or below -6 dBFS RMS, fades over 100 ms, stops after 10 minutes and when the output changes.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
-            .padding(4)
+            .padding(DesignSpacing.xs.pt)
         }
         .onChange(of: settings) { _, new in controller.update(new) }
         .onDisappear { controller.stop() }

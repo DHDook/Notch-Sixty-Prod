@@ -8,16 +8,16 @@ struct MeasurementReadinessNote: View {
     var playbackNotice: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             if let reason = readiness.reason {
                 Label(reason, systemImage: "exclamationmark.circle")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("measurement.readiness.reason")
             }
             if let playbackNotice {
                 Label(playbackNotice, systemImage: "speaker.slash")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("measurement.playback.notice")
             }
@@ -51,7 +51,7 @@ struct RepeatSummaryNote: View {
     var body: some View {
         if let summary = quality.repeatSummary {
             Text(summary)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle((quality.rejectedRepeats ?? []).isEmpty ? Color.secondary : Color.orange)
         }
     }

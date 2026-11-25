@@ -118,7 +118,7 @@ struct ProductionBlindLiveView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             Text("Play your own music through the app, then try to tell two settings apart, or say which you prefer. Level is matched first: the louder side is turned down, never the quieter one turned up. The equaliser, preamp and dynamics are what change between sides; room correction, bass management and output protection stay on for both.")
                 .foregroundStyle(.secondary)
             if let service = model.service {
@@ -131,7 +131,7 @@ struct ProductionBlindLiveView: View {
                 setup
             }
             if let error = model.error {
-                Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                Label(error, systemImage: "exclamationmark.triangle").font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
             }
         }
         .onReceive(tick) { _ in model.service?.refreshReadiness() }
@@ -150,11 +150,11 @@ struct ProductionBlindLiveView: View {
     }
 
     private var setup: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("1. Choose what to compare").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("1. Choose what to compare").font(DesignType.sectionTitle.font)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 16) { pickers }
-                VStack(alignment: .leading, spacing: 8) { pickers }
+                HStack(spacing: DesignSpacing.l.pt) { pickers }
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { pickers }
             }
             Picker("Test", selection: $model.mode) {
                 ForEach(BlindLiveModel.Mode.allCases) { Text($0.rawValue).tag($0) }
@@ -167,15 +167,15 @@ struct ProductionBlindLiveView: View {
                 Text("24 trials").tag(24)
             }
             .frame(maxWidth: 230)
-            Text(model.guidance).font(.caption).foregroundStyle(.secondary)
+            Text(model.guidance).font(DesignType.caption.font).foregroundStyle(.secondary)
             Button("Start blind test") { model.start() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(!model.canStart)
             Text("Playback must be running. The test never starts playback, and it puts your settings back when it ends.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     @ViewBuilder private var pickers: some View {
@@ -198,8 +198,8 @@ struct BlindLiveRunView: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(service.match.summary).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text(service.match.summary).font(DesignType.caption.font).foregroundStyle(.secondary)
             switch service.phase {
             case .trials: trials
             case .askingPreference, .finished: results
@@ -207,15 +207,15 @@ struct BlindLiveRunView: View {
                 Label("\(reason) Your settings are back.", systemImage: "info.circle")
                 Button("Close", action: onClose)
             }
-            if let message = service.message { Text(message).font(.caption).foregroundStyle(.orange) }
+            if let message = service.message { Text(message).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color) }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var trials: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Trial \(service.currentTrialNumber) of \(service.totalTrials)").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Trial \(service.currentTrialNumber) of \(service.totalTrials)").font(DesignType.sectionTitle.font)
             ViewThatFits(in: .horizontal) {
                 HStack { listenButtons }
                 VStack(alignment: .leading) { listenButtons }
@@ -223,12 +223,12 @@ struct BlindLiveRunView: View {
             Text(kind == .abx
                  ? "Play A, B and X as often as you like, but hear X at least once before you answer. Keys: A, B, X, then 1 for \"X is A\" or 2 for \"X is B\"."
                  : "Play A and B as often as you like, but hear both before you answer. Which side is which candidate changes every trial. Keys: A, B, then 1 or 2 for the one you prefer.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
             ViewThatFits(in: .horizontal) {
                 HStack { answerButtons }
                 VStack(alignment: .leading) { answerButtons }
             }
-            Button("Stop and restore my settings", action: onClose).buttonStyle(.bordered)
+            Button("Stop and restore my settings", action: onClose).buttonStyle(.glass)
         }
     }
 
@@ -241,7 +241,7 @@ struct BlindLiveRunView: View {
 
     private func selectButton(_ title: String, _ choice: BlindComparisonService.Selection, key: KeyEquivalent) -> some View {
         Button(title) { service.select(choice) }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .tint(service.selection == choice ? .accentColor : .gray)
             .keyboardShortcut(key, modifiers: [])
             .disabled(!service.canSwitch)
@@ -257,35 +257,35 @@ struct BlindLiveRunView: View {
     }
 
     private var results: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("All \(service.totalTrials) trials are in.").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("All \(service.totalTrials) trials are in.").font(DesignType.sectionTitle.font)
             if let result = service.abxResult {
                 Text("\(result.correct) of \(result.trials) correct (p = \(String(format: "%.4f", result.pValue)))")
-                    .font(.headline.monospacedDigit())
+                    .font(DesignType.sectionTitle.font.monospacedDigit())
                 Text(result.pValue < BlindComparisonStatistics.alpha
                      ? "That is more than guessing would give. You can hear a difference between these two."
                      : "That is within what guessing gives. This run does not show you can hear a difference; it does not prove there is none.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
             if let result = service.preferenceResult {
                 Text("Preferred A \(result.preferredA) times, B \(result.preferredB) times (p = \(String(format: "%.4f", result.pValue)))")
-                    .font(.headline.monospacedDigit())
+                    .font(DesignType.sectionTitle.font.monospacedDigit())
                 Text(result.pValue < BlindComparisonStatistics.alpha
                      ? "That split is unlikely to be chance."
                      : "That split could be chance; no clear preference.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
             if service.phase == .askingPreference {
-                Button("Show which was which") { service.finish() }.buttonStyle(.borderedProminent)
+                Button("Show which was which") { service.finish() }.buttonStyle(.glassProminent)
             }
             if let names = service.revealedNames {
                 Text("A was \(names.a). B was \(names.b).")
             }
             Text("Running the test again until it passes does not count; judge each run on its own. The result is kept in the list of finished tests.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
             HStack {
-                if record != nil { Button("Save a copy of the result…", action: onExport).buttonStyle(.bordered) }
-                Button("Close and restore my settings", action: onClose).buttonStyle(.bordered)
+                if record != nil { Button("Save a copy of the result…", action: onExport).buttonStyle(.glass) }
+                Button("Close and restore my settings", action: onClose).buttonStyle(.glass)
             }
         }
     }
