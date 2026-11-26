@@ -49,9 +49,9 @@ extension AudioIOEngine {
     func setEQEditChannel(_ channel: EQEditChannel) {
         var updated = stereoEQConfiguration
         updated.setEditChannel(channel)
-        stereoEQConfiguration = updated
-        eqConfiguration = legacyEQConfiguration(from: updated)
-        lastErrorDescription = nil
+        commitStereoEQConfiguration(updated)
+        commitEQConfiguration(legacyEQConfiguration(from: updated))
+        setLastError(nil)
     }
 
     func replaceStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
@@ -64,11 +64,11 @@ extension AudioIOEngine {
     func setEQAudition(_ override: EQAuditionOverride?) throws {
         guard override != eqAudition else { return }
         let previous = eqAudition
-        eqAudition = override
+        commitEQAudition(override)
         do {
             try applyStereoEQConfiguration(stereoEQConfiguration, forceRepublish: true)
         } catch {
-            eqAudition = previous
+            commitEQAudition(previous)
             throw error
         }
     }
@@ -180,7 +180,7 @@ extension AudioIOEngine {
 
     func setSoftwareVolumeKeyStep(_ step: MasterVolumeKeyStep) {
         guard step.isValid else { return }
-        softwareVolumeKeyStep = step
+        masterVolume.setSoftwareVolumeKeyStep(step)
     }
 
     func setMasterVolumeLevel(_ level: Double) throws {
@@ -324,8 +324,8 @@ extension AudioIOEngine {
             // instantaneous coefficient/gain discontinuity at the output.
             try session.transitionDSPGraph(graph)
             extrasAdopted = true
-            activeEQFIRProgram = preparedEQFIRProgram
-            linearPhaseDesignInfo = preparedEQFIRProgram?.designInfo
+            programs.setActiveEQFIRProgram(preparedEQFIRProgram)
+            programs.setLinearPhaseDesignInfo(preparedEQFIRProgram?.designInfo)
         } else {
             // Validate the complete target graph while idle even though there
             // is no transport to publish it to yet.
@@ -340,18 +340,18 @@ extension AudioIOEngine {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            activeEQFIRProgram = nil
-            linearPhaseDesignInfo = nil
+            programs.setActiveEQFIRProgram(nil)
+            programs.setLinearPhaseDesignInfo(nil)
         }
 
-        stereoEQConfiguration = state.stereoEQ
-        eqConfiguration = legacyEQConfiguration(from: state.stereoEQ)
-        dynamicsConfiguration = state.dynamics
+        commitStereoEQConfiguration(state.stereoEQ)
+        commitEQConfiguration(legacyEQConfiguration(from: state.stereoEQ))
+        commitDynamicsConfiguration(state.dynamics)
         clearDynamicsListening()  // E28 S7d (G36): a profile switch ends listening and solo
-        gainConfiguration = targetGain
-        ambientCompensationRuntimeTarget = clampedAmbientTarget
-        activeQuietZoneRuntimeTarget = candidateQuietZone
-        lastErrorDescription = nil
+        commitGainConfiguration(targetGain)
+        commitAmbientCompensationRuntimeTarget(clampedAmbientTarget)
+        commitActiveQuietZoneRuntimeTarget(candidateQuietZone)
+        setLastError(nil)
     }
 
     func setInputPreampDB(_ value: Double) throws {
@@ -442,12 +442,10 @@ extension AudioIOEngine {
             try session.transitionDSPGraph(graph)
         }
 
-        gainConfiguration = updated
-        ambientCompensationRuntimeTarget =
-            clampedAmbientTarget
-        activeQuietZoneRuntimeTarget =
-            candidateQuietZone
-        lastErrorDescription = nil
+        commitGainConfiguration(updated)
+        commitAmbientCompensationRuntimeTarget(clampedAmbientTarget)
+        commitActiveQuietZoneRuntimeTarget(candidateQuietZone)
+        setLastError(nil)
     }
 
     func setHeadroomAttenuationDB(_ value: Double) throws {
@@ -483,8 +481,8 @@ extension AudioIOEngine {
         guard lifecycle.state == .idle || configuration == multiOutputRoutingConfiguration else {
             throw MultiOutputRoutingError.routingChangeRequiresIdle
         }
-        multiOutputRoutingConfiguration = configuration
-        lastErrorDescription = nil
+        commitMultiOutputRoutingConfiguration(configuration)
+        setLastError(nil)
     }
 
     func replaceOutputDeviceProfileConfiguration(
@@ -504,8 +502,8 @@ extension AudioIOEngine {
         guard lifecycle.state == .idle || configuration == outputDeviceProfileConfiguration else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
-        outputDeviceProfileConfiguration = configuration
-        lastErrorDescription = nil
+        commitOutputDeviceProfileConfiguration(configuration)
+        setLastError(nil)
     }
 
     func replaceHeadphoneDeviceProfileConfiguration(
@@ -554,21 +552,21 @@ extension AudioIOEngine {
                 return
             case .reconfigure:
                 try validateHeadphoneSessionKindChange(configuration)
-                headphoneDeviceProfileConfiguration = configuration
-                lastErrorDescription = nil
+                commitHeadphoneDeviceProfileConfiguration(configuration)
+                setLastError(nil)
                 scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, settleDelay: 0.03)
                 return
             }
         }
-        headphoneDeviceProfileConfiguration = configuration
+        commitHeadphoneDeviceProfileConfiguration(configuration)
         if configuration?.enabled == true,
            configuration?.spatialMode == .virtualSpeakers,
            configuration?.headTracking?.enabled == true {
-            headTrackingRuntimeStatus = .configuredStopped
+            transport.setHeadTrackingRuntimeStatus(.configuredStopped)
         } else {
-            headTrackingRuntimeStatus = .disabled
+            transport.setHeadTrackingRuntimeStatus(.disabled)
         }
-        lastErrorDescription = nil
+        setLastError(nil)
     }
 
     /// E6 S9c: everything a session-kind change would need at the rebuild, checked before the change is committed so
@@ -604,8 +602,8 @@ extension AudioIOEngine {
             if let issue = alignment.issue { throw issue }
             if !unifiedGraphEnabled, let refusal = alignment.legacyKernelRefusal { throw refusal }
         }
-        stereoAlignment = alignment
-        lastErrorDescription = nil
+        commitStereoAlignment(alignment)
+        setLastError(nil)
     }
 
     /// The stored dynamics with the fold's output limiter merged in while a wider source is folded (stricter of each
@@ -626,8 +624,8 @@ extension AudioIOEngine {
             }
         }
         guard plan != programFoldPlan else { return }
-        programFoldPlan = plan
-        lastErrorDescription = nil
+        commitProgramFoldPlan(plan)
+        setLastError(nil)
         if transportSession != nil {
             scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, cause: .plannedProfileChange)
         }
@@ -647,8 +645,8 @@ extension AudioIOEngine {
         }
         try configuration.validateStructure(sampleRate: session.outputFormat.sampleRate)
         try session.applyLiveHeadphoneProfile(configuration)
-        headphoneDeviceProfileConfiguration = configuration
-        lastErrorDescription = nil
+        commitHeadphoneDeviceProfileConfiguration(configuration)
+        setLastError(nil)
     }
 
     /// E6 S9c: a headphone profile edit inside one graph-rendered binaural session. The channel correction (headroom,
@@ -666,15 +664,15 @@ extension AudioIOEngine {
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
         case .success(let newBase): try republishLiveGraph(currentLiveGraphInputs, headphoneBase: newBase)
         }
-        headphoneDeviceProfileConfiguration = configuration
-        lastErrorDescription = nil
+        commitHeadphoneDeviceProfileConfiguration(configuration)
+        setLastError(nil)
         if assetChanged { beginHeadphoneAssetSwap(session: session, profile: configuration) }
     }
 
     func beginHeadphoneAssetSwap(
         session: CoreAudioBinauralHeadphoneTransportSession, profile: HeadphoneDeviceProfileConfiguration
     ) {
-        headphoneAssetGeneration &+= 1
+        advanceHeadphoneAssetGeneration()
         let generation = headphoneAssetGeneration
         guard let reference = profile.binauralProfile else { return }
         let rate = session.outputFormat.sampleRate
@@ -719,13 +717,13 @@ extension AudioIOEngine {
             case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
             try republishLiveGraph(currentLiveGraphInputs, headphoneBase: newBase)
-            renderedBinauralProfile = reference
-            lastErrorDescription = nil
+            transport.setRenderedBinauralProfile(reference)
+            setLastError(nil)
         } catch {
-            lastErrorDescription = error.localizedDescription
+            setLastError(error.localizedDescription)
             if var restored = headphoneDeviceProfileConfiguration, let rendered = renderedBinauralProfile {
                 restored.binauralProfile = rendered
-                headphoneDeviceProfileConfiguration = restored
+                commitHeadphoneDeviceProfileConfiguration(restored)
             }
         }
     }

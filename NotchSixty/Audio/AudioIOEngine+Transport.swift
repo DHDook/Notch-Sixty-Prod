@@ -9,12 +9,12 @@ extension AudioIOEngine {
         try refreshOutputDevices()
         guard let output = selectedOutputDevice else {
             let error = AudioRouteSelectionError.outputDeviceUnavailable(uid: routeConfiguration.selectedOutputUID ?? "No output selected")
-            lastErrorDescription = error.localizedDescription
+            setLastError(error.localizedDescription)
             throw error
         }
 
         if resetProcessingSessionCounters {
-            processingSessionArchivedCounters = AudioTransportCounters()
+            transport.resetProcessingSessionCounters()
         }
 
         do {
@@ -27,7 +27,7 @@ extension AudioIOEngine {
             try setLifecycle(.running)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
             try syncMasterVolumeMonitorToSelectedOutput()
-            lastErrorDescription = nil
+            setLastError(nil)
         } catch {
             tearDownTransport(fadeOut: false)
             forceFailedState(error)
@@ -37,7 +37,7 @@ extension AudioIOEngine {
 
     func setLifecycle(_ nextState: AudioLifecycleState) throws {
         try lifecycle.transition(to: nextState)
-        lifecycleState = lifecycle.state
+        mirrorLifecycleState()
     }
 
     func buildTransport(output: AudioOutputDevice) throws {
@@ -143,8 +143,8 @@ extension AudioIOEngine {
         guard configuration != speakerRoutingConfiguration else { return }
         let wasActive = speakerRoutingConfiguration?.enabled == true
         guard lifecycle.state != .idle, active || wasActive else {
-            speakerRoutingConfiguration = configuration
-            lastErrorDescription = nil
+            transport.setSpeakerRoutingConfiguration(configuration)
+            setLastError(nil)
             return
         }
         if let configuration, active, let current = speakerRoutingConfiguration, wasActive,
@@ -152,12 +152,12 @@ extension AudioIOEngine {
            current.outputEndpoints == configuration.outputEndpoints,
            current.subwooferSourceCount == configuration.subwooferSourceCount {
             try republishLiveGraph(currentLiveGraphInputs, routing: configuration)
-            speakerRoutingConfiguration = configuration
-            lastErrorDescription = nil
+            transport.setSpeakerRoutingConfiguration(configuration)
+            setLastError(nil)
             return
         }
-        speakerRoutingConfiguration = configuration
-        lastErrorDescription = nil
+        transport.setSpeakerRoutingConfiguration(configuration)
+        setLastError(nil)
         scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, settleDelay: 0.03)
     }
 
@@ -199,10 +199,7 @@ extension AudioIOEngine {
             unifiedGraphIneligibility: nil,
             unifiedGraphRequired: true
         )
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        linearPhaseDesignInfo = nil
+        programs.clearAll()
         nChannelTransportSession = session
     }
 
@@ -350,10 +347,7 @@ extension AudioIOEngine {
             unifiedGraphRequired: unifiedGraphEnabled && stagedAudioUnitRack == nil || needsGraphForSubs,
             ancFeedSplitter: ancSplitter
         )
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        linearPhaseDesignInfo = nil
+        programs.clearAll()
         nChannelTransportSession = session
         adoptQuietZoneReferenceHost()
     }
@@ -361,7 +355,7 @@ extension AudioIOEngine {
     /// E26 S7b2c: a new profile session starts with fresh reference rings, so the anchor fan-out restarts and the
     /// speaker-drive demand is re-applied to the new feed (a no-op unless the profile session hosts Quiet Zone).
     func adoptQuietZoneReferenceHost() {
-        speakerDriveAnchorFanout.reset()
+        speakerDrive.resetAnchorFanout()
         applySpeakerDriveDemand()
     }
 
@@ -447,7 +441,7 @@ extension AudioIOEngine {
         // rather than refusing to start after a nominal-rate change.
         let asset = try binauralAssetCache.asset(
             for: reference, sampleRate: output.nominalSampleRate, store: binauralProfileAssetStore)
-        renderedBinauralProfile = reference
+        transport.setRenderedBinauralProfile(reference)
         let prepared = try asset.prepare(for: profile.programLayout)
         let headphoneSnapshot = try profile.makeRealtimeSnapshot(
             sampleRate: output.nominalSampleRate
@@ -513,11 +507,8 @@ extension AudioIOEngine {
             unifiedGraphIneligibility: graphIneligibility,
             unifiedGraphRequired: (unifiedGraphEnabled && stagedAudioUnitRack == nil) || longResponse
         )
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        linearPhaseDesignInfo = nil
-        binauralHeadphoneTransportSession = session
+        programs.clearAll()
+        transport.setBinauralHeadphoneSession(session)
 
         if let tracking = profile.headTracking, tracking.enabled {
             let controller = SpatialHeadTrackingController(
@@ -527,14 +518,14 @@ extension AudioIOEngine {
                 session: session
             ) { [weak self] status in
                 Task { @MainActor [weak self] in
-                    self?.headTrackingRuntimeStatus = status
+                    self?.transport.setHeadTrackingRuntimeStatus(status)
                 }
             }
-            headTrackingController = controller
+            transport.setHeadTrackingController(controller)
             try controller.start()
         } else {
-            headTrackingController = nil
-            headTrackingRuntimeStatus = .disabled
+            transport.setHeadTrackingController(nil)
+            transport.setHeadTrackingRuntimeStatus(.disabled)
         }
     }
 
@@ -621,7 +612,7 @@ extension AudioIOEngine {
             .makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
         var foldSource: AudioOutputDevice?
         var foldPlan: ProgramFoldDownPlan?
-        foldMatrixInUse = nil
+        transport.setFoldMatrixInUse(nil)
         switch programFoldBuildDecision(for: output) {
         case .standard: break
         case .tapSource(let device):
@@ -632,7 +623,7 @@ extension AudioIOEngine {
             }
             foldSource = device
             foldPlan = programFoldPlan
-            foldMatrixInUse = programFoldPlan?.matrix
+            transport.setFoldMatrixInUse(programFoldPlan?.matrix)
         case .waitForSource(let uid): throw CoreAudioTransportError.programFoldFailed(.sourceUnavailable(uid: uid))
         case .refuse(let reason): throw CoreAudioTransportError.programFoldFailed(reason)
         }
@@ -662,13 +653,8 @@ extension AudioIOEngine {
         session.setInitialAnalyserTaps(installed: analyserTapsInstalled)
         try session.configureHeadphoneDSP(
             headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)
-        activeEQFIRProgram = nil
-        nextEQFIRProgramSlot = 0
+        programs.resetForNewSession()
         eqFIRCache.removeAll()
-        activeRoomCorrectionProgram = nil
-        nextRoomCorrectionProgramSlot = 0
-        activeSpeakerIRProgram = nil
-        nextSpeakerIRProgramSlot = 0
         var graph = try stereoTransportStartGraph(sampleRate: session.outputFormat.sampleRate)
 
         if FIRUpdatePolicy.shouldPrepareEQFIR(
@@ -676,15 +662,15 @@ extension AudioIOEngine {
             playback: playbackControlConfiguration
         ) {
             let preparedProgram = try prepareEQFIRProgram(renderStereoEQConfiguration, for: session)
-            activeEQFIRProgram = preparedProgram
-            linearPhaseDesignInfo = preparedProgram.designInfo
+            programs.setActiveEQFIRProgram(preparedProgram)
+            programs.setLinearPhaseDesignInfo(preparedProgram.designInfo)
             try attachEQFIRProgram(preparedProgram, to: &graph)
         } else {
-            linearPhaseDesignInfo = nil
+            programs.setLinearPhaseDesignInfo(nil)
         }
 
-        roomCorrectionInactiveReason = roomCorrectionConfiguration.enabled && roomCorrectionConfiguration.lanes != nil
-            ? .needsSpeakerProfile : nil
+        programs.setRoomCorrectionInactiveReason(roomCorrectionConfiguration.enabled && roomCorrectionConfiguration.lanes != nil
+            ? .needsSpeakerProfile : nil)
         if roomCorrectionConfiguration.isActiveOnStereoKernel {
             guard let filter = roomCorrectionConfiguration.filter else {
                 throw RoomCorrectionConfigurationError.filterRequired
@@ -695,7 +681,7 @@ extension AudioIOEngine {
                 playback: playbackControlConfiguration
             ) {
                 let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
-                activeRoomCorrectionProgram = preparedProgram
+                programs.setActiveRoomCorrectionProgram(preparedProgram)
                 try attachRoomCorrectionProgram(preparedProgram, to: &graph)
             }
         }
@@ -710,7 +696,7 @@ extension AudioIOEngine {
                 playback: playbackControlConfiguration
             ) {
                 let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
-                activeSpeakerIRProgram = preparedProgram
+                programs.setActiveSpeakerIRProgram(preparedProgram)
                 try attachSpeakerIRProgram(preparedProgram, to: &graph)
             }
         }
@@ -718,8 +704,8 @@ extension AudioIOEngine {
         try applyAudioUnitRackLatency(to: &graph)
         session.feedForwardLiveFeatureEnabled = speakerDriveFeatureEnabled
         try session.publishDSPGraph(graph)
-        transportSession = session
-        speakerDriveAnchorFanout.reset()
+        transport.setSession(session)
+        speakerDrive.resetAnchorFanout()
         applySpeakerDriveDemand()
     }
 
@@ -740,76 +726,67 @@ extension AudioIOEngine {
 
     func tearDownTransport(fadeOut: Bool, cause: TransportTeardownCause = .other) {
         liveGenerator = nil
-        foldMatrixInUse = nil
+        transport.setFoldMatrixInUse(nil)
         roomCorrectionABXOverride = nil
         // E27 S3b: an audition never outlives the transport. The stored EQ is untouched.
-        if eqAudition != nil { eqAudition = nil }
+        if eqAudition != nil { commitEQAudition(nil) }
         // E28 S7d (G36): the graph dies with the transport, and so does listening and solo (Stop, output change, Quit).
-        dynamicsListener = nil
-        dynamicsSoloBands = []
+        commitDynamicsListener(nil)
+        commitDynamicsSoloBands([])
         if let controller = headTrackingController {
             controller.stop()
-            headTrackingController = nil
+            transport.setHeadTrackingController(nil)
         }
         if headphoneDeviceProfileConfiguration?.enabled == true,
            headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers,
            headphoneDeviceProfileConfiguration?.headTracking?.enabled == true {
-            headTrackingRuntimeStatus = .configuredStopped
+            transport.setHeadTrackingRuntimeStatus(.configuredStopped)
         } else {
-            headTrackingRuntimeStatus = .disabled
+            transport.setHeadTrackingRuntimeStatus(.disabled)
         }
 
         if let session = transportSession {
             let counters = session.counters()
-            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
-            lifetimeArchivedCounters.bufferedFrames = 0
-            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
-            processingSessionArchivedCounters.bufferedFrames = 0
+            transport.archive(counters)
             // E4 S25 follow-up: the reference ring dies with the session; the pump must not outlive it.
             feedForwardLiveDriver.stop()
-            speakerDriveAnchorFanout.reset()
+            speakerDrive.resetAnchorFanout()
             session.stop(fadeOut: fadeOut)
-            transportSession = nil
+            transport.setSession(nil)
         }
         if let session = nChannelTransportSession {
             let counters = session.counters()
-            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
-            lifetimeArchivedCounters.bufferedFrames = 0
-            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
-            processingSessionArchivedCounters.bufferedFrames = 0
+            transport.archive(counters)
             // The reference ring dies with the session; the live pump must not outlive it.
             if session.hostsQuietZone {
                 feedForwardLiveDriver.stop()
-                speakerDriveAnchorFanout.reset()
+                speakerDrive.resetAnchorFanout()
             }
             session.stop(fadeOut: fadeOut)
             nChannelTransportSession = nil
         }
         if let session = binauralHeadphoneTransportSession {
             let counters = session.counters()
-            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
-            lifetimeArchivedCounters.bufferedFrames = 0
-            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
-            processingSessionArchivedCounters.bufferedFrames = 0
+            transport.archive(counters)
             session.stop(fadeOut: fadeOut)
-            binauralHeadphoneTransportSession = nil
+            transport.setBinauralHeadphoneSession(nil)
         }
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
+        programs.clearActivePrograms()
         // E4 S30c: a transport rebuild clears the unmasking cuts (the session that held them is gone).
-        ambientCompensationRuntimeTarget.unmaskingCutsDB = nil
+        var ambientTarget = ambientCompensationRuntimeTarget
+        ambientTarget.unmaskingCutsDB = nil
+        commitAmbientCompensationRuntimeTarget(ambientTarget)
         syncActiveQuietZoneLease(active: false)
         // The app's own profile switch happens while arming and keeps the arm (see `disarmReason`).
-        if cause != .plannedProfileChange { liveTreatmentGeneration &+= 1 }
+        if cause != .plannedProfileChange { transport.advanceLiveTreatmentGeneration() }
         notifyTransportTeardown(cause)
     }
 
     func forceFailedState(_ error: Error) {
-        lastErrorDescription = error.localizedDescription
+        setLastError(error.localizedDescription)
         if AudioLifecycleStateMachine.canTransition(from: lifecycle.state, to: .failed) {
             try? lifecycle.transition(to: .failed)
-            lifecycleState = lifecycle.state
+            mirrorLifecycleState()
         }
     }
 
@@ -825,7 +802,7 @@ extension AudioIOEngine {
 
         if !selectedIsPresent {
             masterVolumeController.stopMonitoring()
-            masterVolumeCapabilities = .softwareOnly
+            masterVolume.setCapabilities(.softwareOnly)
         } else {
             try? syncMasterVolumeMonitorToSelectedOutput()
         }

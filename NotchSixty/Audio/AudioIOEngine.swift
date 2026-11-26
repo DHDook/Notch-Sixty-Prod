@@ -54,9 +54,6 @@ final class AudioIOEngine {
         activeQuietZoneLeaseKeeper?.start()
     }
 
-    /// E8 S4: the speaker routing a session renders, or nil. See `replaceSpeakerRoutingConfiguration`.
-    var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
-
     private let deviceCatalog: any OutputDeviceCataloging
     let eventMonitor: any AudioHardwareEvents
     let masterVolumeController: any MasterVolumeDeviceControlling
@@ -64,50 +61,26 @@ final class AudioIOEngine {
     /// E6 S9c: converted HRTF assets per (asset, rate), shared by session start and live asset swaps.
     let binauralAssetCache = BinauralResampledAssetCache()
     /// Newest live HRTF asset swap request; an older prepare that finishes later is dropped.
-    var headphoneAssetGeneration: UInt64 = 0
-    /// The HRTF asset the running binaural graph renders (a requested swap is pending while it differs from the
-    /// configuration's).
-    var renderedBinauralProfile: BinauralProfileReference?
-    private let masterVolumeStore: (any MasterVolumePersisting)?
-    /// Output whose stored software volume has already been restored. A sync
-    /// for the same output (external change, device-list refresh) never
-    /// overwrites the user's current level.
-    private var masterVolumeSynchronizedOutputUID: String?
+    private(set) var headphoneAssetGeneration: UInt64 = 0
+    let masterVolumeStore: (any MasterVolumePersisting)?
     var lifecycle: AudioLifecycleStateMachine
-    var transportSession: CoreAudioTransportSession?
     /// E25 S2: applied to each new stereo session.
-    var stereoAlignment: StereoBassAlignment?
+    private(set) var stereoAlignment: StereoBassAlignment?
     /// E25 S8a: the wider-source fold the user configured (nil: none), and the matrix of the session that is running or
     /// being built with it. The protection merge keys on the second, so a fold that resolves to the standard path
     /// (no source tapped) adds no limiter.
-    var programFoldPlan: ProgramFoldDownPlan?
-    var foldMatrixInUse: FoldDownMatrix?
+    private(set) var programFoldPlan: ProgramFoldDownPlan?
     /// E25 S8c: read-only views of the applied arrangement state, so profile load and the wizard are comparable.
     var appliedStereoAlignment: StereoBassAlignment? { stereoAlignment }
     var appliedProgramFoldPlan: ProgramFoldDownPlan? { programFoldPlan }
     var nChannelTransportSession: CoreAudioNChannelTransportSession?
-    var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
-    var headTrackingController: SpatialHeadTrackingController?
-    var lifetimeArchivedCounters = AudioTransportCounters()
-    var processingSessionArchivedCounters = AudioTransportCounters()
-    var reconfigurationWorkItem: DispatchWorkItem?
-    var recoveryWorkItem: DispatchWorkItem?
-    var recoveryGeneration: UInt64 = 0
-    var recoveryConsecutiveBuildFailures = 0
-    var resumeAfterWake = false
     private var prepared = false
-    var activeEQFIRProgram: PreparedEQFIRProgram?
-    var nextEQFIRProgramSlot: UInt32 = 0
     /// E27 S3c: designed taps of the recent EQ configurations, so an A/B toggle redesigns nothing.
     var eqFIRCache = EQFIRProgramCache()
     var eqOffMain = EQOffMainState()
     /// Linear-phase designs run so far (a cache hit runs none). Tests read it.
     var eqFIRDesignCount: Int { eqFIRCache.designCount }
-    var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
-    var nextRoomCorrectionProgramSlot: UInt32 = 0
-    var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
-    var nextSpeakerIRProgramSlot: UInt32 = 0
-    var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
+    private(set) var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
     /// E19 S6: the graph MIMO treatment controller (stage, permit, arm switch); see `AudioIOEngine+MIMOTreatment.swift`.
     @ObservationIgnored lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
     var mimoPollTask: Task<Void, Never>?
@@ -118,7 +91,7 @@ final class AudioIOEngine {
         if case .known(let video) = mimoVideoLatencyInput { return video }
         return false
     }
-    var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
+    private(set) var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
     /// Set when a rate change or output recovery dropped a rack built for the
     /// previous format; cleared once the rebuild request has been issued.
     private var audioUnitRackRebuildPending = false
@@ -130,68 +103,87 @@ final class AudioIOEngine {
     /// configuration keeps the deployed filter; only the realtime program uses
     /// the adapted one.
     var roomCorrectionFilterAdapter: (@MainActor (RoomCorrectionFilter, Double) -> RoomCorrectionFilter?)?
-    var adaptedRoomCorrectionFilter:
-        (source: RoomCorrectionFilter, sampleRate: Double, filter: RoomCorrectionFilter)?
 
-    var sampleRateChangesHandled: UInt64 = 0
-    var recoveryAttempts: UInt64 = 0
-    var recoverySuccesses: UInt64 = 0
-    var recoveryFailures: UInt64 = 0
 
     private(set) var outputDevices: [AudioOutputDevice] = []
     private(set) var routeConfiguration: AudioRouteConfiguration
-    var eqConfiguration = EQConfiguration()
-    var stereoEQConfiguration = StereoEQConfiguration()
+    private(set) var eqConfiguration = EQConfiguration()
+    private(set) var stereoEQConfiguration = StereoEQConfiguration()
     /// E27 S3b: the band-pass "Listen" audition, if one is held. Never stored in
     /// `stereoEQConfiguration`, the profile or undo; it only changes what is rendered.
-    var eqAudition: EQAuditionOverride?
+    private(set) var eqAudition: EQAuditionOverride?
     /// The EQ as rendered: the stored EQ, or the audition band-pass while one is held.
     var renderStereoEQConfiguration: StereoEQConfiguration {
         eqAudition.map { stereoEQConfiguration.auditioned($0) } ?? stereoEQConfiguration
     }
-    var playbackControlConfiguration = PlaybackControlConfiguration()
-    private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
-    var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
+    private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
     /// E16 S2: told when media keys may act (software volume on a selected output). `VolumeKeyController` owns the monitor.
     @ObservationIgnored var onVolumeKeyRouteChange: ((Bool) -> Void)?
-    var softwareVolumeKeyStep = MasterVolumeKeyStep.fraction(denominator: 16)
-    var gainConfiguration = DSPGainConfiguration()
-    var bassManagementConfiguration = BassManagementConfiguration()
-    var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
-    var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
-    var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
-    var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
-    var dynamicsConfiguration = DynamicsConfiguration() {
+    private(set) var gainConfiguration = DSPGainConfiguration()
+    private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
+    private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
+    private(set) var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
+    private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
+    private(set) var dynamicsConfiguration = DynamicsConfiguration() {
         // E9 S5b: keeps the output-protection policy in step with restored and replaced settings.
         didSet { UnifiedGraphOutputProtection.apply(settings: dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()) }
     }
     /// E28 S7d: session state of dynamics listening and multiband solo (never encoded, never persisted). The graph host holds
     /// the same state; these mirror it for the Dynamics page and the banner. Cleared on a profile switch, Stop, an output
     /// change and Quit.
-    var dynamicsListener: DynamicsListener?
-    var dynamicsSoloBands: Set<Int> = []
-    var roomCorrectionConfiguration = RoomCorrectionConfiguration()
+    private(set) var dynamicsListener: DynamicsListener?
+    private(set) var dynamicsSoloBands: Set<Int> = []
+    private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     /// E24 S3b: why an enabled lane-plan correction is not shaping playback right now, for Room Correction to show.
-    var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
     /// E24 S3b: the engine's per-rate cache of lane-plan synthesis (design note 8).
     let roomCorrectionRateCache = RoomCorrectionRateCache()
-    var speakerIRConfiguration = SpeakerIRConfiguration()
-    var ambientCompensationRuntimeTarget =
+    private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
+    private(set) var ambientCompensationRuntimeTarget =
         AmbientCompensationTarget.unity
-    var activeQuietZoneRuntimeTarget =
+    private(set) var activeQuietZoneRuntimeTarget =
         ActiveQuietZoneRuntimeTarget.bypassed
-    var linearPhaseDesignInfo: EQLinearPhaseDesignInfo?
-    var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
-    var lastErrorDescription: String?
-    var lifecycleState: AudioLifecycleState
-    /// E4 S7: the low-latency output profile Quiet Zone requests, and the
-    /// buffer size it set on the current output (nil when off or not applied).
-    var lowLatencyOutputProfileActive = false
-    var lowLatencyOutputBufferFrames: UInt32?
+    private(set) var lastErrorDescription: String?
+    private(set) var lifecycleState: AudioLifecycleState
     let lowLatencyBufferProfile: LowLatencyOutputBufferProfile
-    /// Restore deferred to the rebuild, so the physical output never changes
-    /// size under a live tap aggregate.
-    var lowLatencyRestorePending = false
+    /// G20: output-recovery and low-latency state; see `OutputRecoveryState`.
+    let recovery = OutputRecoveryState()
+    /// G20: session handles, counters, head tracking and routing; see `TransportSessionState`.
+    let transport = TransportSessionState()
+    /// G20: prepared convolution programs and their slot cursors; see `PreparedProgramSlots`.
+    let programs = PreparedProgramSlots()
+    /// G20: speaker-drive demand, anchor fan-out and analyser taps; see `SpeakerDriveState`.
+    let speakerDrive = SpeakerDriveState()
+    /// G20: level, mute, device capabilities and key step; see `MasterVolumeState` and `AudioIOEngine+MasterVolume.swift`.
+    let masterVolume = MasterVolumeState()
+    // E8 S4: `speakerRoutingConfiguration` is the routing a session renders; see `replaceSpeakerRoutingConfiguration`.
+    // `liveTreatmentGeneration` is the arm token: it advances on every teardown and disarm, and
+    // `replaceActiveQuietZoneRuntimeTarget` rejects an active target stamped with any other value.
+
+    // G20: single-value state is `private(set)` here and changes through these one-line mutators, so no extension can store
+    // a value without going through the engine. Setters publish to the render path first, then commit.
+    func commitEQConfiguration(_ v: EQConfiguration) { eqConfiguration = v }
+    func commitStereoEQConfiguration(_ v: StereoEQConfiguration) { stereoEQConfiguration = v }
+    func commitEQAudition(_ v: EQAuditionOverride?) { eqAudition = v }
+    func commitPlaybackControlConfiguration(_ v: PlaybackControlConfiguration) { playbackControlConfiguration = v }
+    func commitGainConfiguration(_ v: DSPGainConfiguration) { gainConfiguration = v }
+    func commitBassManagementConfiguration(_ v: BassManagementConfiguration) { bassManagementConfiguration = v }
+    func commitMultiOutputRoutingConfiguration(_ v: MultiOutputRoutingConfiguration?) { multiOutputRoutingConfiguration = v }
+    func commitOutputDeviceProfileConfiguration(_ v: OutputDeviceProfileConfiguration?) { outputDeviceProfileConfiguration = v }
+    func commitHeadphoneDeviceProfileConfiguration(_ v: HeadphoneDeviceProfileConfiguration?) { headphoneDeviceProfileConfiguration = v }
+    func commitSpeakerDriverProcessingConfiguration(_ v: SpeakerDriverProcessingConfiguration) { speakerDriverProcessingConfiguration = v }
+    func commitDynamicsConfiguration(_ v: DynamicsConfiguration) { dynamicsConfiguration = v }
+    func commitDynamicsListener(_ v: DynamicsListener?) { dynamicsListener = v }
+    func commitDynamicsSoloBands(_ v: Set<Int>) { dynamicsSoloBands = v }
+    func commitRoomCorrectionConfiguration(_ v: RoomCorrectionConfiguration) { roomCorrectionConfiguration = v }
+    func commitSpeakerIRConfiguration(_ v: SpeakerIRConfiguration) { speakerIRConfiguration = v }
+    func commitAmbientCompensationRuntimeTarget(_ v: AmbientCompensationTarget) { ambientCompensationRuntimeTarget = v }
+    func commitActiveQuietZoneRuntimeTarget(_ v: ActiveQuietZoneRuntimeTarget) { activeQuietZoneRuntimeTarget = v }
+    func commitStereoAlignment(_ v: StereoBassAlignment?) { stereoAlignment = v }
+    func commitProgramFoldPlan(_ v: ProgramFoldDownPlan?) { programFoldPlan = v }
+    func advanceHeadphoneAssetGeneration() { headphoneAssetGeneration &+= 1 }
+    func setLastError(_ description: String?) { lastErrorDescription = description }
+    func mirrorLifecycleState() { lifecycleState = lifecycle.state }
 
     init(
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
@@ -516,14 +508,9 @@ final class AudioIOEngine {
         transportTeardownObservers.removeAll { $0.id == id }
     }
 
-    /// Arm token for live treatment targets. It advances on every transport teardown and every
-    /// disarm; `replaceActiveQuietZoneRuntimeTarget` rejects an active target stamped with any
-    /// other value. Control plane only.
-    var liveTreatmentGeneration: UInt64 = 0
-
     /// Called by the arm owner on disarm: targets built under the old arm can no longer play.
     func revokeLiveTreatmentArm() {
-        liveTreatmentGeneration &+= 1
+        transport.advanceLiveTreatmentGeneration()
         // E6 S12h part 2b: the stereo session's hosted feed fades out at once; the next publish carries the revoke.
         transportSession?.revokeHostedQuietZone()
         // A republish (an EQ change, say) must not re-authorise the revoked target: the hosted feed is armed by the snapshot.
@@ -1100,9 +1087,9 @@ final class AudioIOEngine {
         guard lifecycle.state == .idle else { return }
         guard let uid else {
             routeConfiguration.selectedOutputUID = nil
-            masterVolumeSynchronizedOutputUID = nil
+            masterVolume.setSynchronizedOutputUID(nil)
             masterVolumeController.stopMonitoring()
-            masterVolumeCapabilities = .softwareOnly
+            masterVolume.setCapabilities(.softwareOnly)
             onVolumeKeyRouteChange?(false)
             return
         }
@@ -1122,11 +1109,7 @@ final class AudioIOEngine {
 
     func stop(cause: TransportTeardownCause) {
         guard lifecycle.state != .idle else { return }
-        recoveryGeneration &+= 1
-        reconfigurationWorkItem?.cancel()
-        recoveryWorkItem?.cancel()
-        reconfigurationWorkItem = nil
-        recoveryWorkItem = nil
+        recovery.cancelAllPending()
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
         tearDownTransport(fadeOut: true, cause: cause)
@@ -1137,9 +1120,7 @@ final class AudioIOEngine {
     }
 
     func shutdownForTermination() {
-        recoveryGeneration &+= 1
-        reconfigurationWorkItem?.cancel()
-        recoveryWorkItem?.cancel()
+        recovery.cancelAllPending()
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         if lifecycle.state != .idle {
             if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
@@ -1159,157 +1140,11 @@ final class AudioIOEngine {
 
     /// E27 S2c (design note 16). Whether stereo graphs carry the Equalizer analyser taps. The analyser controller sets it;
     /// the engine and the core read no flag.
-    var analyserTapsInstalled = false
 
     /// E4 S22b1: records what is written to the speakers for the feed-forward echo model.
     /// Set from `e4.feedforward-live`; while false nothing ever sets the demand.
-    var speakerDriveFeatureEnabled = false
-    var speakerDriveDemandMux = SpeakerDriveDemandMux()
-    var speakerDriveAnchorFanout = SpeakerDriveAnchorFanout()
     /// E4 S25 follow-up: runs the live reference pump; idle unless the shadow asks and the flag is on.
     @ObservationIgnored private(set) lazy var feedForwardLiveDriver = FeedForwardLiveDriver(host: self)
-
-    var currentMasterSoftwareGain: Float {
-        masterVolumeConfiguration.softwareGain(for: masterVolumeCapabilities)
-    }
-
-    func applyMasterVolumeConfiguration(
-        _ configuration: MasterVolumeConfiguration,
-        writeDevice: Bool
-    ) throws {
-        guard configuration.level.isFinite,
-              MasterVolumeConfiguration.levelRange.contains(configuration.level) else {
-            throw MasterVolumeConfigurationError.invalidLevel(configuration.level)
-        }
-
-        if writeDevice, let output = selectedOutputDevice {
-            if masterVolumeCapabilities.controlMode == .device {
-                try masterVolumeController.setVolume(configuration.level, deviceID: output.deviceID)
-            }
-            if masterVolumeCapabilities.usesDeviceMute {
-                try masterVolumeController.setMuted(configuration.muted, deviceID: output.deviceID)
-            }
-        }
-
-        let oldSoftwareGain = currentMasterSoftwareGain
-        let newSoftwareGain = configuration.softwareGain(for: masterVolumeCapabilities)
-        if let session = transportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
-            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
-                sampleRate: session.outputFormat.sampleRate,
-                gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: renderDynamicsConfiguration(),
-                playbackConfiguration: playbackControlConfiguration,
-                masterGainLinear: newSoftwareGain
-            )
-            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: renderStereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
-            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
-            try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
-            try applyAudioUnitRackLatency(to: &graph)
-            try session.publishDSPGraph(graph)
-        }
-        if let session = nChannelTransportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
-            session.setOutputGain(newSoftwareGain)
-        }
-        if let session = binauralHeadphoneTransportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
-            session.setOutputGain(newSoftwareGain)
-        }
-
-        masterVolumeConfiguration = configuration
-        persistSoftwareMasterVolumeIfNeeded()
-        lastErrorDescription = nil
-    }
-
-    private func persistSoftwareMasterVolumeIfNeeded() {
-        guard masterVolumeCapabilities.controlMode == .softwareDSP,
-              let uid = selectedOutputDevice?.uid,
-              uid == masterVolumeSynchronizedOutputUID else { return }
-        masterVolumeStore?.storeSoftwareVolume(masterVolumeConfiguration, forOutputUID: uid)
-    }
-
-    func syncMasterVolumeMonitorToSelectedOutput() throws {
-        guard let output = selectedOutputDevice else {
-            masterVolumeController.stopMonitoring()
-            masterVolumeCapabilities = .softwareOnly
-            onVolumeKeyRouteChange?(false)
-            return
-        }
-        try masterVolumeController.monitor(deviceID: output.deviceID)
-        try synchronizeMasterVolumeFromSelectedDevice()
-        onVolumeKeyRouteChange?(masterVolumeCapabilities.controlMode == .softwareDSP)
-    }
-
-    private func synchronizeMasterVolumeFromSelectedDevice() throws {
-        guard let output = selectedOutputDevice else { return }
-        let previousCapabilities = masterVolumeCapabilities
-        let snapshot = try masterVolumeController.inspect(deviceID: output.deviceID)
-        masterVolumeCapabilities = snapshot.capabilities
-
-        var updated = masterVolumeConfiguration
-        let firstSyncForOutput = masterVolumeSynchronizedOutputUID != output.uid
-        if snapshot.capabilities.controlMode == .device, let level = snapshot.level {
-            updated.level = min(max(level, 0), 1)
-        } else if snapshot.capabilities.controlMode == .softwareDSP,
-                  firstSyncForOutput,
-                  let restored = masterVolumeStore?.restoredSoftwareVolume(forOutputUID: output.uid) {
-            updated.level = min(max(restored.level, 0), 1)
-            if !snapshot.capabilities.usesDeviceMute {
-                updated.muted = restored.muted
-            }
-        }
-        if snapshot.capabilities.usesDeviceMute, let muted = snapshot.muted {
-            updated.muted = muted
-        }
-        masterVolumeSynchronizedOutputUID = output.uid
-
-        let oldGain = masterVolumeConfiguration.softwareGain(for: previousCapabilities)
-        let newGain = updated.softwareGain(for: snapshot.capabilities)
-        if let session = transportSession, abs(oldGain - newGain) > 0.000_001 {
-            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
-                sampleRate: session.outputFormat.sampleRate,
-                gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: renderDynamicsConfiguration(),
-                playbackConfiguration: playbackControlConfiguration,
-                masterGainLinear: newGain
-            )
-            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: renderStereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
-            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
-            try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
-            try applyAudioUnitRackLatency(to: &graph)
-            try session.publishDSPGraph(graph)
-        }
-        if let session = nChannelTransportSession, abs(oldGain - newGain) > 0.000_001 {
-            session.setOutputGain(newGain)
-        }
-        if let session = binauralHeadphoneTransportSession, abs(oldGain - newGain) > 0.000_001 {
-            session.setOutputGain(newGain)
-        }
-        masterVolumeConfiguration = updated
-    }
-
-    private func handleMasterVolumeDeviceChange() {
-        do {
-            try synchronizeMasterVolumeFromSelectedDevice()
-            lastErrorDescription = nil
-        } catch {
-            lastErrorDescription = error.localizedDescription
-        }
-    }
-
-    /// E16 S2: a media-key level change. Software volume only; never writes the device.
-    func applySoftwareVolumeKey(level: Double) {
-        guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
-        var updated = masterVolumeConfiguration
-        updated.level = level
-        do {
-            try applyMasterVolumeConfiguration(updated, writeDevice: false)
-            lastErrorDescription = nil
-        } catch {
-            lastErrorDescription = error.localizedDescription
-        }
-    }
-
 
     // MARK: E6 S9b live edits on a graph-rendered N-channel or binaural session
 
