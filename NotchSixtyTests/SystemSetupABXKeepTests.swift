@@ -59,7 +59,7 @@ extension OfflineSetupRig {
             controller.select(.x)
             let handed = try XCTUnwrap(abxPlayer.played.last)
             // B is the mixed-phase (music latency mode) design; A is the video-mode minimum phase one.
-            let xIsB = handed.install.design.latencyMode != .video
+            let xIsB = try XCTUnwrap(handed.installedLanes).design.latencyMode != .video
             controller.answer(xIsB: correct ? xIsB : !xIsB)
         }
     }

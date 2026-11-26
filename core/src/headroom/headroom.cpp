@@ -160,6 +160,30 @@ bool prepareChain(const n60_headroom_stage *stages, uint32_t count, double rate,
     return true;
 }
 
+// E12 S28b1: ITU-R BS.1770-4 K-weighting power at `w` (rad/sample), the two biquads designed for any rate by the
+// bilinear transform from the standard's analogue prototypes (shelf 1681.97 Hz, +4 dB; high-pass 38.14 Hz).
+double kWeightPower(double rate, double w) {
+    const auto design = [&](double f0, double gainDb, double q, bool shelf, Biquad &out) {
+        const double k = std::tan(kPi * f0 / rate);
+        if (shelf) {
+            const double vh = std::pow(10.0, gainDb / 20.0), vb = std::pow(vh, 0.4996667741545416);
+            const double a0 = 1.0 + k / q + k * k;
+            out = {(vh + vb * k / q + k * k) / a0, 2.0 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0,
+                   2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0};
+        } else {
+            const double a0 = 1.0 + k / q + k * k;
+            out = {1.0 / a0, -2.0 / a0, 1.0 / a0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0};
+        }
+    };
+    Biquad shelf{}, hp{};
+    design(1681.974450955533, 3.999843853973347, 0.7071752369554196, true, shelf);
+    design(38.13547087602444, 0.0, 0.5003270373238773, false, hp);
+    // The high-pass of BS.1770 has unnormalised numerator [1,-2,1]; `design` divided by a0, so undo that scale.
+    const double hpScale = 1.0 + std::tan(kPi * 38.13547087602444 / rate) / 0.5003270373238773 +
+                           std::pow(std::tan(kPi * 38.13547087602444 / rate), 2.0);
+    return std::norm(biquadAt(shelf, w)) * std::norm(biquadAt(hp, w)) * hpScale * hpScale;
+}
+
 }  // namespace
 
 extern "C" {
@@ -211,6 +235,53 @@ int n60_headroom_evaluate(const n60_headroom_output *o, n60_headroom_result *r) 
     r->peak_hz = bestHz;
     r->true_peak_margin_db = N60_HEADROOM_TRUE_PEAK_MARGIN_DB;
     r->required_trim_db = std::max(0.0, bestDb + N60_HEADROOM_TRUE_PEAK_MARGIN_DB - o->ceiling_db);
+    r->grid_points = points;
+    return N60_HEADROOM_OK;
+}
+
+int n60_headroom_weighted_level(const n60_headroom_output *o, n60_headroom_level_result *r) {
+    if (o == nullptr || r == nullptr || o->struct_size != sizeof(n60_headroom_output) ||
+        r->struct_size != sizeof(n60_headroom_level_result) || !std::isfinite(o->sample_rate) || o->sample_rate < 8000.0 ||
+        o->sample_rate > 768000.0 || o->path_count < 1 || o->path_count > 64 || o->paths == nullptr) {
+        return N60_HEADROOM_ERR_ARGUMENT;
+    }
+    std::vector<std::vector<Prepared>> paths(o->path_count);
+    std::vector<Prepared> tail;
+    for (uint32_t i = 0; i < o->path_count; ++i) {
+        const n60_headroom_path &p = o->paths[i];
+        if (p.combine > N60_HEADROOM_COMBINE_POWER) return N60_HEADROOM_ERR_ARGUMENT;
+        if (!prepareChain(p.stages, p.stage_count, o->sample_rate, paths[i])) return N60_HEADROOM_ERR_STAGE;
+    }
+    if (!prepareChain(o->tail_stages, o->tail_stage_count, o->sample_rate, tail)) return N60_HEADROOM_ERR_STAGE;
+
+    // Pink noise has equal power per octave, so on a log-spaced grid every point has the same weight.
+    const double maxHz = std::min(N60_HEADROOM_MAX_FRACTION * o->sample_rate, N60_HEADROOM_LEVEL_MAX_HZ);
+    double sumChain = 0.0, sumFlat = 0.0;
+    uint32_t points = 0;
+    for (uint32_t k = 0;; ++k) {
+        const double hz = N60_HEADROOM_MIN_HZ * std::exp2(static_cast<double>(k) / N60_HEADROOM_GRID_STEPS_PER_OCTAVE);
+        if (hz > maxHz) break;
+        const double w = 2.0 * kPi * hz / o->sample_rate;
+        Cx coherent = 0.0;
+        double power = 0.0;
+        for (uint32_t i = 0; i < o->path_count; ++i) {
+            const Cx h = chainAt(paths[i], w);
+            if (o->strict != 0 || o->paths[i].combine == N60_HEADROOM_COMBINE_COHERENT) {
+                coherent += h;
+            } else {
+                power += std::norm(h);
+            }
+        }
+        const double mag2 = (std::norm(coherent) + power) * std::norm(chainAt(tail, w));
+        const double kw = kWeightPower(o->sample_rate, w);
+        sumChain += mag2 * kw;
+        sumFlat += kw;
+        ++points;
+    }
+    if (points == 0 || !(sumFlat > 0.0)) return N60_HEADROOM_ERR_ARGUMENT;
+    const double ratio = sumChain / sumFlat;
+    r->power_ratio = ratio;
+    r->level_db = 10.0 * std::log10(std::max(ratio, 1.0e-30));
     r->grid_points = points;
     return N60_HEADROOM_OK;
 }

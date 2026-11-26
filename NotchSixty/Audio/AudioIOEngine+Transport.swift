@@ -727,7 +727,7 @@ extension AudioIOEngine {
     func tearDownTransport(fadeOut: Bool, cause: TransportTeardownCause = .other) {
         liveGenerator = nil
         transport.setFoldMatrixInUse(nil)
-        roomCorrectionABXOverride = nil
+        auditionOverride = nil
         // E27 S3b: an audition never outlives the transport. The stored EQ is untouched.
         if eqAudition != nil { commitEQAudition(nil) }
         // E28 S7d (G36): the graph dies with the transport, and so does listening and solo (Stop, output change, Quit).

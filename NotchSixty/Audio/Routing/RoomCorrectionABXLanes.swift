@@ -8,15 +8,6 @@ import Foundation
 // difference of the plans' declared latencies as a pure delay on the shorter one. Sample rate: any rate to 384 kHz.
 // Channels: up to N60_LAYOUT_MAX_CHANNELS lanes. Reset: the engine clears the override on Stop and teardown.
 
-/// What the engine plays instead of the profile's applied lanes while the ABX sheet is open.
-struct RoomCorrectionABXOverride: Equatable, Sendable {
-    var install: RoomCorrectionLaneInstall
-    /// Linear trim applied to the whole program (the louder candidate is trimmed down, so nothing clips).
-    var gain: Float
-    /// Frames added to every source lane (mains and subwoofers) so both candidates arrive together.
-    var extraDelayFrames: UInt32
-}
-
 enum RoomCorrectionABXError: Error, Equatable, LocalizedError {
     case unavailable(String)
     case noProgramLanes
@@ -35,14 +26,14 @@ enum RoomCorrectionABXError: Error, Equatable, LocalizedError {
 @MainActor
 protocol RoomCorrectionABXPlaying: ComparisonEngine {
     /// `unavailableReason`, `isSwitching` and `restoreApplied` come from `ComparisonEngine` (E12 S26).
-    func play(_ override: RoomCorrectionABXOverride) throws
+    func play(_ override: AuditionOverride) throws
 }
 
 extension AudioIOEngine: RoomCorrectionABXPlaying {
     var unavailableReason: String? { roomCorrectionABXUnavailableReason }
     var isSwitching: Bool { graphRebuildInProgress }
-    func play(_ override: RoomCorrectionABXOverride) throws { try setRoomCorrectionABXOverride(override) }
-    func restoreApplied() throws { try setRoomCorrectionABXOverride(nil) }
+    func play(_ override: AuditionOverride) throws { try setAuditionOverride(override) }
+    func restoreApplied() throws { try setAuditionOverride(nil) }
 }
 
 extension RoomCorrectionABXMatch {
@@ -89,9 +80,8 @@ extension RoomCorrectionABXMatch {
     }
 
     /// The override for candidate A (`isA`) or B: its install with the match's trim and delay.
-    func override(for install: RoomCorrectionLaneInstall, isA: Bool) -> RoomCorrectionABXOverride {
-        RoomCorrectionABXOverride(
-            install: install, gain: Float(isA ? gainA : gainB), extraDelayFrames: UInt32(isA ? delayA : delayB))
+    func override(for install: RoomCorrectionLaneInstall, isA: Bool) -> AuditionOverride {
+        .lanes(install, gain: Float(isA ? gainA : gainB), latencyPadFrames: UInt32(isA ? delayA : delayB))
     }
 
     /// True when a lane differs by more than the 0.5 dB the sheet tolerates without a warning (Q16).

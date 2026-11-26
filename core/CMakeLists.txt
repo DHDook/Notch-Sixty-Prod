@@ -497,6 +497,11 @@ add_executable(n60core_headroom_test tests/test_headroom.cpp)
 target_link_libraries(n60core_headroom_test PRIVATE n60core)
 add_test(NAME n60core_headroom COMMAND n60core_headroom_test)
 
+# E12 S28b1: K-weighted pink-noise level of one output.
+add_executable(n60core_headroom_level_test tests/test_headroom_level.cpp)
+target_link_libraries(n60core_headroom_level_test PRIVATE n60core)
+add_test(NAME n60core_headroom_level COMMAND n60core_headroom_level_test)
+
 # E19 S4: MIMO treatment graph stage (ABI v33).
 add_executable(n60core_mimo_stage_test tests/test_mimo_stage.cpp)
 target_include_directories(n60core_mimo_stage_test PRIVATE src)

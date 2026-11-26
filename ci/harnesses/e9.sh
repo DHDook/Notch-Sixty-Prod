@@ -16,6 +16,21 @@ if selected e9_headroom_core; then
     fi
 fi
 
+# E12 S28b1: K-weighted pink-noise level of one output (blind-listening level match).
+if selected e12_headroom_level; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_headroom_level.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e12_core_headroom_level" && run_timed "$OUT/e12_core_headroom_level"; then
+            passed+=(e12_core_headroom_level)
+        else
+            failed+=(e12_core_headroom_level)
+        fi
+    else
+        failed+=(e12_headroom_level)
+    fi
+fi
+
 # E9 S1: non-uniform partitioned FIR engine (accuracy, latency, block-size independence, tick cost, delay mode).
 if selected e9_conv; then
     build_core_objs
