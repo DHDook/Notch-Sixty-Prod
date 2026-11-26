@@ -197,6 +197,15 @@ set_target_properties(n60core_readbacks_test PROPERTIES C_STANDARD 11 LINKER_LAN
 target_link_libraries(n60core_readbacks_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_readbacks COMMAND n60core_readbacks_test)
 
+# E23 T2: graph output against the frozen kernel corpus (tests/e23_corpus.h). Portable: no NotchSixty sources, so they run on
+# Linux too. A -DN60_E23_WRITE_CORPUS build (kernel reference, Apple-only) regenerates the .inc files.
+foreach(name cleanup fracdelay image)
+  add_executable(n60core_${name}_parity_test tests/test_${name}_parity.c)
+  set_target_properties(n60core_${name}_parity_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+  target_link_libraries(n60core_${name}_parity_test PRIVATE n60core ${N60_M})
+  add_test(NAME n60core_${name}_parity COMMAND n60core_${name}_parity_test)
+endforeach()
+
 # E11 S1: measurement core (n60/measure.h). The tests reach the internal offline FFT, so they see src/.
 add_executable(n60core_measure_fft_test tests/test_measure_fft.cpp)
 target_include_directories(n60core_measure_fft_test PRIVATE src)

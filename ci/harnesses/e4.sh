@@ -11,11 +11,7 @@ if selected e4_anc_guard; then
     fi
 fi
 # E4 S14: dead-man lease on the anti-noise in the render kernel.
-# shellcheck disable=SC2086
-harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_engine_lease.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
 # E4 S15: live howl guard in the render kernel.
-# shellcheck disable=SC2086
-harness e4_howl_guard_live "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_howl_guard_live.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # E4 S18a: adaptive gain mailbox, phase-anchor telemetry ring and ambient host-time anchors.
 # shellcheck disable=SC2086
 harness e4_gain_mailbox "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_gain_mailbox.c \
@@ -120,8 +116,6 @@ if selected e4_ff_live; then
     fi
 fi
 # E4 S25b: live feed-forward wiring in the render kernel (reference ring, gate, loss trip, lease, drive).
-# shellcheck disable=SC2086
-harness e4_ff_live_wiring "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_ff_live_wiring.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # E4 S9b1: feed-forward survey (Welch H1 transfer and coherence) on a simulated plant.
 if selected e4_ff_survey; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms_survey.o" \

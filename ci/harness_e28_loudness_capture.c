@@ -211,7 +211,7 @@ static void bridgeCase(double rate) {
     CHECK(got == MAXB * 16u, "read %u at %.0f", got, rate);
     float inL = peak(inBuf, got, 2u, 0u), inR = peak(inBuf, got, 2u, 1u), outL = peak(outBuf, got, 2u, 0u);
     CHECK(fabsf(inL - 0.4f) < 0.01f && fabsf(inR - 0.4f) < 0.01f, "input peaks %.3f %.3f at %.0f", inL, inR, rate);
-    CHECK(outL > 0.3f && outL < 0.45f, "legacy output peak %.3f at %.0f", outL, rate);
+    (void)outL;  /* E23 T2: the pre-graph (legacy render core) output level is no longer asserted; the graph output is, below. */
 
     /* with a 0.5 gain graph the Output halves and the Input does not */
     const float half = 0.5f;
@@ -229,7 +229,7 @@ static void bridgeCase(double rate) {
         for (int i = 0; i < 16; ++i) runBlock(b, MAXB, &pos, rate, 0.4f);
         got = N60LoudnessCaptureRead(b->loudnessCapture, inBuf, outBuf, MAXB * 16u);
         CHECK(got == MAXB * 16u, "graph read %u", got);
-        /* the first block can still carry the legacy tail: look at the last 8 */
+        /* the first blocks can still carry the pre-graph render: look at the last 8 */
         const uint32_t skip = MAXB * 8u;
         float gIn = peak(inBuf + skip * 2u, got - skip, 2u, 0u), gOut = peak(outBuf + skip * 2u, got - skip, 2u, 0u);
         CHECK(fabsf(gIn - 0.4f) < 0.01f, "graph input peak %.3f", gIn);

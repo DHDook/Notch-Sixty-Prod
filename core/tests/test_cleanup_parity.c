@@ -1,20 +1,33 @@
-/* E6 S12a: the core CLEANUP stage (DC offset filter, infrasonic cascade, mains notch, hum detector) against the
- * shipping kernel pre-EQ block (N60Dynamics.c) on the same stereo signal at the eight standard rates, for four
- * configurations. Apple-only (kernel sources use nullability qualifiers). Target: -120 dBFS peak, -130 dBFS RMS. */
+/* E6 S12a, E23 T2: the core CLEANUP stage (DC offset filter, infrasonic cascade, mains notch, hum detector) at the eight
+ * standard rates, for four configurations, against a frozen corpus (e23_corpus_cleanup.inc, see e23_corpus.h). Each case
+ * holds the mains detector readback, then the left and right output summaries.
+ * A -DN60_E23_WRITE_CORPUS build also runs the original kernel comparison (N60Dynamics.c pre-EQ block; Apple-only) with
+ * its bounds -120 dBFS peak, -130 dBFS RMS, and writes the corpus from the graph output. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "n60/graph.h"
+#include "e23_corpus.h"
+#ifdef N60_E23_WRITE_CORPUS
 #include "../../NotchSixty/Audio/Realtime/N60Dynamics.h"
+#else
+#include "e23_corpus_cleanup.inc"
+#endif
 
 #define N 400000
 static float inL[N], inR[N], kL[N], kR[N], cL[N], cR[N];
+#define STRIDE (1 + 2 * E23_CH_VALUES)
 
 int main(void) {
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     int failures = 0;
+#ifdef N60_E23_WRITE_CORPUS
+    e23_open("kCorpus");
+#else
+    (void)kL; (void)kR;
+#endif
     for (unsigned r = 0; r < 8; r++) {
         const double rate = rates[r];
         for (unsigned m = 0; m < 4; m++) {
@@ -35,6 +48,7 @@ int main(void) {
             float depths[16];
             for (int k = 0; k < 16; k++) depths[k] = -12.0f - (float)k;
 
+#ifdef N60_E23_WRITE_CORPUS
             N60DynamicsSnapshot snap = N60DynamicsSnapshotMakeBypassed(rate);
             bool ok = N60DynamicsSnapshotSetDCOffsetFilter(&snap, rate, dc);
             ok = ok && N60DynamicsSnapshotSetInfrasonicFilter(&snap, rate, infra, 20.0, (N60InfrasonicSlope)slope);
@@ -49,6 +63,7 @@ int main(void) {
             const N60DynamicsTelemetry tel = N60DynamicsRuntimeTelemetry(rt);
             free(rt);
 
+#endif
             float p[26] = {(float)dc, (float)infra, 20.0f, (float)slope, (float)mains, fund, (float)count, 20.0f, (float)det, centre};
             for (int k = 0; k < 16; k++) p[10 + k] = depths[k];
             n60_stage_desc st;
@@ -76,44 +91,66 @@ int main(void) {
                 float *op[2] = {cL + off, cR + off};
                 n60_graph_process(g, ip, op, 512 > N - off ? N - off : 512);
             }
-            double peak = 0, ss = 0;
-            for (int i = 0; i < N; i++) {
-                double e = fabs((double)cL[i] - kL[i]);
-                if (e > peak) peak = e;
-                ss += e * e;
-                e = fabs((double)cR[i] - kR[i]);
-                if (e > peak) peak = e;
-                ss += e * e;
-            }
             double moved = 0;
             for (int i = 0; i < N; i++) { double e = fabs((double)cL[i] - inL[i]); if (e > moved) moved = e; }
             if (!(moved > 1e-3)) { fprintf(stderr, "FAIL stage did not change the signal\n"); failures++; }
-            const double rms = sqrt(ss / (2.0 * N));
             n60_mains_readback mr;
             memset(&mr, 0, sizeof mr);
             mr.structSize = sizeof mr;
-            double fdiff = 0;
             if (det) {
                 if (n60_graph_read_mains(g, 1, &mr) != N60_STATUS_OK) { fprintf(stderr, "read_mains failed\n"); failures++; }
-                fdiff = fabs((double)mr.frequencyHz - tel.mainsDetectedFrequencyHz);
+                if (!(mr.frequencyHz > 40.0f)) { fprintf(stderr, "FAIL detector found nothing\n"); failures++; }
             }
-            printf("rate %.0f mode %u: peak %.1f dBFS rms %.1f dBFS det %.3f (kernel %.3f)\n", rate, m,
-                   20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), mr.frequencyHz, tel.mainsDetectedFrequencyHz);
-            /* E6 S12f2 parity exception: the core runs the DC blocker and the infrasonic cascade in double
-             * (float DF2T state noise with poles near 1 at 10 Hz / 384 kHz was up to 0 dB of the signal),
-             * so the float kernel is the less accurate side. Those modes (0 DC, 1 and 3 infrasonic) only
-             * bound the kernel's own error; test_state_carry.cpp asserts the core against a double
-             * reference. The mains notch path (mode 2) stays at the strict -120 / -130 dBFS target. */
-            const double peakLim = (m == 1 || m == 3) ? -25.0 : (m == 0 ? -80.0 : -120.0);
-            const double rmsLim = (m == 1 || m == 3) ? -30.0 : (m == 0 ? -85.0 : -130.0);
-            if (!(20 * log10(peak + 1e-30) < peakLim)) { fprintf(stderr, "FAIL peak\n"); failures++; }
-            if (!(20 * log10(rms + 1e-30) < rmsLim)) { fprintf(stderr, "FAIL rms\n"); failures++; }
-            if (det && !(mr.frequencyHz > 40.0f)) { fprintf(stderr, "FAIL detector found nothing\n"); failures++; }
-            if (det && !(fdiff < 0.01)) { fprintf(stderr, "FAIL detector\n"); failures++; }
+            const int latency = (int)n60_graph_latency_frames(g);
+            double rec[STRIDE];
+            rec[0] = mr.frequencyHz;
+            e23_summarise(cL, N, latency, rec + 1);
+            e23_summarise(cR, N, latency, rec + 1 + E23_CH_VALUES);
+#ifdef N60_E23_WRITE_CORPUS
+            {
+                double peak = 0, ss = 0;
+                for (int i = 0; i < N; i++) {
+                    double e = fabs((double)cL[i] - kL[i]);
+                    if (e > peak) peak = e;
+                    ss += e * e;
+                    e = fabs((double)cR[i] - kR[i]);
+                    if (e > peak) peak = e;
+                    ss += e * e;
+                }
+                const double rms = sqrt(ss / (2.0 * N));
+                const double fdiff = det ? fabs((double)mr.frequencyHz - tel.mainsDetectedFrequencyHz) : 0.0;
+                printf("rate %.0f mode %u: peak %.1f dBFS rms %.1f dBFS det %.3f (kernel %.3f)\n", rate, m,
+                       20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), mr.frequencyHz, tel.mainsDetectedFrequencyHz);
+                /* E6 S12f2 parity exception: the core runs the DC blocker and the infrasonic cascade in double
+                 * (float DF2T state noise with poles near 1 at 10 Hz / 384 kHz was up to 0 dB of the signal),
+                 * so the float kernel is the less accurate side. Those modes (0 DC, 1 and 3 infrasonic) only
+                 * bound the kernel's own error; test_state_carry.cpp asserts the core against a double
+                 * reference. The mains notch path (mode 2) stays at the strict -120 / -130 dBFS target. */
+                const double peakLim = (m == 1 || m == 3) ? -25.0 : (m == 0 ? -80.0 : -120.0);
+                const double rmsLim = (m == 1 || m == 3) ? -30.0 : (m == 0 ? -85.0 : -130.0);
+                if (!(20 * log10(peak + 1e-30) < peakLim)) { fprintf(stderr, "FAIL peak\n"); failures++; }
+                if (!(20 * log10(rms + 1e-30) < rmsLim)) { fprintf(stderr, "FAIL rms\n"); failures++; }
+                if (det && !(fdiff < 0.01)) { fprintf(stderr, "FAIL detector\n"); failures++; }
+            }
+            e23_put(rec, STRIDE);
+#else
+            {
+                const double *want = kCorpus + (size_t)(r * 4 + m) * STRIDE;
+                char label[64];
+                snprintf(label, sizeof label, "rate %.0f mode %u L", rate, m);
+                failures += e23_compare(rec + 1, want + 1, label);
+                snprintf(label, sizeof label, "rate %.0f mode %u R", rate, m);
+                failures += e23_compare(rec + 1 + E23_CH_VALUES, want + 1 + E23_CH_VALUES, label);
+                if (det && !(fabs(rec[0] - want[0]) < 0.01)) { fprintf(stderr, "FAIL detector %.4f vs frozen %.4f at %.0f mode %u\n", rec[0], want[0], rate, m); failures++; }
+            }
+#endif
             n60_graph_retire(g);
         }
     }
+#ifdef N60_E23_WRITE_CORPUS
+    e23_close();
+#endif
     if (failures) return 1;
-    puts("n60core parity: CLEANUP matches the kernel pre-EQ block");
+    puts("n60core parity: CLEANUP matches the frozen corpus");
     return 0;
 }

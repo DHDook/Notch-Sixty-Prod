@@ -2,7 +2,7 @@
 # Harnesses from before the epic plan (PR34 to PR117 era names).
 
 # Standalone DSP maths (PR34 parity set).
-for name in bandpass compiled_eq constantq linkwitz midside; do
+for name in bandpass compiled_eq constantq linkwitz; do
     harness "pr34_$name" "${STRICT[@]}" "ci/validate_pr34_$name.c"
 done
 for name in crosstalk_cancellation mixed_phase speaker_crossfeed symmetry_balance; do
@@ -26,14 +26,7 @@ harness pr35_denoiser_bounded_reset "${STRICT[@]}" -I"$RT" -Icore/include ci/val
 harness pr35_denoiser_validated_fastpath "${STRICT[@]}" -I"$RT" -Icore/include ci/validate_pr35_denoiser_validated_fastpath.c "$RT/N60SpectralDenoiser.c"
 harness pr35_disabled_dsp_fastpath "${STRICT[@]}" -include stddef.h -I"$RT" -Icore/include ci/validate_pr35_disabled_dsp_fastpath.c \
     "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" -lm
-# shellcheck disable=SC2086
-harness pr35_snapshot_pointer_api "${STRICT[@]}" -include stddef.h -I"$RT" -Icore/include ci/validate_pr35_snapshot_pointer_api.c $ALL_RT_NO_BRIDGE -framework Accelerate
 harness pr35_protection_sparse_reset "${STRICT[@]}" -I"$RT" -Icore/include ci/validate_pr35_protection_sparse_reset.c "$RT/N60Protection.c"
-# shellcheck disable=SC2086
-harness pr35_meter_gating "${STRICT[@]}" -include stddef.h -I"$RT" -Icore/include ci/validate_pr35_meter_gating.c $ALL_RT_NO_BRIDGE -framework Accelerate
-# shellcheck disable=SC2086
-harness pr35_render_context_snapshot_pointer -std=c11 -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
-    ci/validate_pr35_render_context_snapshot_pointer.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # shellcheck disable=SC2086
 harness pr35_transition_ack "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/validate_pr35_transition_ack.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio

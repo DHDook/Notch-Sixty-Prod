@@ -91,10 +91,6 @@ jobs:
           OUT="$RUNNER_TEMP/benchmarks"
           # Link step shared with pr.yml (ci/build_benchmarks.sh); this step then runs the binaries.
           ci/build_benchmarks.sh "$OUT"
-          for opt in O0 O3; do
-            echo "=== render kernel $opt ===" | tee -a "$OUT/benchmarks.txt"
-            "$OUT/render-$opt" | tee -a "$OUT/benchmarks.txt"
-          done
           echo "=== realtime bridge O3 ===" | tee -a "$OUT/benchmarks.txt"
           "$OUT/bridge-O3" | tee -a "$OUT/benchmarks.txt"
           echo "=== multi-sub search ===" | tee -a "$OUT/benchmarks.txt"
