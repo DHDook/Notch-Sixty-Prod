@@ -707,7 +707,9 @@ unified graph only.
 - [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR #464); the rest is S1b `e23/precision-and-cleanup`
 - [~] S1b `e23/precision-and-cleanup` (#707, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
 - [x] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
-- [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
+- [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h); K1 `e23/kernel-off-render-path` (E23 G22)
+- [ ] T1 `e23/kernel-tests-xctest` and T2 `e23/kernel-tests-harnesses`: migrate or retire every kernel-referencing XCTest and C harness (graph-only, frozen corpus or retire; E23 G21)
+- [ ] S4 part 4 `e23/s4-part4-setter-protection`: restore setter protection on the 63 relaxed properties and move the keyboard volume region, after E16 S2 (E23 G20)
 - [x] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 43 files (not 17) that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
 - [x] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner): deleted `ContentView.swift` and its debug tab; controls with no production home are in E23 G17 (S9)
 - [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
@@ -716,11 +718,11 @@ unified graph only.
 - [ ] S7 `e23/overload-step-down` (failure and rate review, owner approved 15 Nov 2026); needs-owner, engine: when the render misses deadlines repeatedly, step down in a fixed, announced order (analysis and meters first, then optional stages chosen in Swift and published through the snapshot path) and tell the user what was switched off and why; never silently, never protection, crossover or an armed treatment's guard. Today the listener only hears dropouts and sees a counter (E23 G12)
 - [ ] S8 `e23/exclusive-mode-players` (failure and rate review, owner approved 15 Nov 2026); investigation first: find out what the listener hears when another app takes exclusive (hog) control of the selected DAC or changes its rate, then make it a named state with a clear message, never silence without a reason or unprocessed audio to a protected system (E23 G13). E22 bench: one exclusive-mode player on a real DAC
 - [ ] S9 `e23/dead-code-cleanup` (codebase audit, owner approved 15 Nov 2026); needs-owner (ANC and MIMO files): delete the Swift files and types the app never reaches (early Quiet Zone and PR98 types, the old Swift MIMO designer and FIR compiler, unused acceptance evaluators), remove or decide core functions with no app caller, split and rename `CoreAudioError.swift`, make the two skipped SOFA tests run or delete them (G14). List in `docs/epics/E23.md`
-- [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
-- [ ] Delete the legacy bridge MIMO path (`N60MIMOTreatment*.h`, `stagedRoomTreatment`), frozen since E19 S6 (E19 G25)
-- [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
-- [ ] With the kernel: delete the bridge per-frame output loop (E20 G8), the hand-set flush-to-zero in `N60OutputIOProc` (E20 G9), and the trusted legacy `nonblocking` declarations (E20 G44)
-- [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
+- [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1); K2
+- [ ] Delete the legacy bridge MIMO path (`N60MIMOTreatment*.h`, `stagedRoomTreatment`), frozen since E19 S6 (E19 G25); K3
+- [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag: flag in K1, stereo kernel in K2 (closes E23 G8), N-channel path in K3
+- [ ] With the kernel: delete the bridge per-frame output loop (E20 G8), the hand-set flush-to-zero in `N60OutputIOProc` (E20 G9), and the trusted legacy `nonblocking` declarations (E20 G44); K2
+- [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21; K3
 
 ### E22 Hardware validation
 
