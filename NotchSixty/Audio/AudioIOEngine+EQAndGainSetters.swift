@@ -212,7 +212,8 @@ extension AudioIOEngine {
     /// snapshot.
     func transitionContentAuditionState(
         _ state: ContentABAuditionState,
-        additionalInputAttenuationDB: Double = 0
+        additionalInputAttenuationDB: Double = 0,
+        forceRepublish: Bool = false
     ) throws {
         guard additionalInputAttenuationDB.isFinite,
               (-24.0...0.0).contains(additionalInputAttenuationDB) else {
@@ -262,7 +263,8 @@ extension AudioIOEngine {
         UnifiedGraphOutputProtection.apply(settings: state.dynamics.outputProtection ?? OutputProtectionSettings())
         defer { UnifiedGraphOutputProtection.apply(settings: dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()) }
         if immutableSemanticTransportActive {
-            if state.stereoEQ != stereoEQConfiguration
+            if forceRepublish
+                || state.stereoEQ != stereoEQConfiguration
                 || state.dynamics != dynamicsConfiguration
                 || targetGain != gainConfiguration
                 || clampedAmbientTarget != ambientCompensationRuntimeTarget {

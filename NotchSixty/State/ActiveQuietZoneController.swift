@@ -1016,6 +1016,7 @@ final class ActiveQuietZoneController: ObservableObject {
             }
             // E4 S15: a trip latched in an earlier arm must not keep the new one silent.
             engine.rearmHowlGuard()
+            engine.endAuditionForArming()  // E12 S28b2: an open blind comparison ends and restores first
             try arm.arm(environment: liveTreatmentEnvironment())
             flightRecorder.recordArm()
             onSessionEvent?("Quiet Zone armed.")

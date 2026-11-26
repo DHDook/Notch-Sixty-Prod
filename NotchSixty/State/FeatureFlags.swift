@@ -321,12 +321,13 @@ extension FeatureFlag {
 
     /// E12 S26-S28: Blind Listening. S26 adds the shared comparison service (`BlindComparisonService`) that the setup
     /// sheet's room-correction test already runs on; S27 and S28 add the page that tests what the app does. Swift only;
-    /// the engine never reads it. Off: the page and the setup sheet are as they are today. Graduates in E12 S28;
+    /// the engine never reads it. Off: the page and the setup sheet are as they are today. Graduated in E12 S28b2;
     /// removed in the flag-cleanup phase.
     static let blindListening = FeatureFlag(
         id: "e12.blind-listening",
         title: "Blind Listening",
-        epic: "E12"
+        epic: "E12",
+        graduated: true
     )
 
     /// E12 S10, S11, S29-S31: guided setup improvements. S10 adds the quick path (a step preset of the same flow);

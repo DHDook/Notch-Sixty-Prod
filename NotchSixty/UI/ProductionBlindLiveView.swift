@@ -28,6 +28,11 @@ final class BlindLiveModel: ObservableObject {
     @Published var trialCount = 16
     @Published private(set) var service: BlindComparisonService?
     @Published private(set) var error: String?
+    /// E12 S28b2: the test is being prepared (both sides built and measured) before the first trial.
+    @Published private(set) var isPreparing = false
+    /// Q1: the user confirms, once per test, that the mains can take full-range bass for "Everything off".
+    @Published var confirmFullRangeBass = false
+    private var preparation: Task<Void, Never>?
     /// The record of the test that just finished; nil until the trials are in.
     @Published private(set) var finishedRecord: BlindTestRecord?
     /// The fixed switch time; tests shorten it.
@@ -41,7 +46,31 @@ final class BlindLiveModel: ObservableObject {
     }
 
     func reload() {
-        candidates = ComparisonCandidates.list(current: player.currentContentState(), presets: profiles.contentPresets)
+        let current = player.currentContentState()
+        var list = ComparisonCandidates.list(current: current, presets: profiles.contentPresets)
+        if let system = player as? SystemAuditionPlaying {
+            let context = system.systemContext
+            list.insert(ComparisonCandidates.everythingOff(current: current, context: context, bassOff: bassMayGoOff(context)), at: 2)
+            list += ComparisonCandidates.systemProfiles(profiles.systemProfiles, current: current, context: context)
+        }
+        candidates = list
+    }
+
+    private func bassMayGoOff(_ context: SystemAuditionContext?) -> Bool {
+        guard let context else { return false }
+        return context.subwoofers == 0 || confirmFullRangeBass
+    }
+
+    /// True when "Everything off" is chosen, a subwoofer is configured and bass management is on: the question of Q1.
+    var needsFullRangeBassConfirmation: Bool {
+        guard candidates.contains(where: { $0.kind == .everythingOff && ($0.id == sideAID || $0.id == sideBID) }),
+              let context = (player as? SystemAuditionPlaying)?.systemContext else { return false }
+        return context.subwoofers > 0 && context.running.bassManagement.enabled
+    }
+
+    /// The picker label for a side: a greyed one says why.
+    func label(_ candidate: ComparisonCandidate) -> String {
+        candidate.unavailableReason.map { "\(candidate.name) (\($0))" } ?? candidate.name
     }
 
     func prefillFromRemote() {
@@ -51,8 +80,10 @@ final class BlindLiveModel: ObservableObject {
 
     var guidance: String { BlindComparisonStatistics.guidance(kind: mode.kind, trials: trialCount) }
 
-    var canStart: Bool { service == nil && sideAID != sideBID }
+    var canStart: Bool { service == nil && !isPreparing && sideAID != sideBID }
 
+    /// Content-only pairs start at once. A pair with a system side builds and measures both graphs first (off the main
+    /// actor), so `start` returns before the test is ready; `awaitPreparation` waits for it.
     func start() {
         reload()
         guard let a = candidates.first(where: { $0.id == sideAID }), let b = candidates.first(where: { $0.id == sideBID }) else {
@@ -63,21 +94,46 @@ final class BlindLiveModel: ObservableObject {
             error = reason
             return
         }
-        do {
-            let made = try BlindLiveComparison.makeService(player: player, a: a, b: b, kind: mode.kind, trialCount: trialCount, switchHold: switchHold)
-            names = (a.name, b.name)
-            recorded = false
-            finishedRecord = nil
-            forwarding = made.objectWillChange.sink { [weak self] _ in
-                self?.objectWillChange.send()
-                // The published change fires before the new value lands, so read it on the next turn.
-                Task { @MainActor [weak self] in self?.recordIfFinished() }
+        if a.isSystemSide || b.isSystemSide {
+            guard let system = player as? SystemAuditionPlaying else {
+                error = "Comparing system settings is not available here."
+                return
             }
-            service = made
+            isPreparing = true
             error = nil
+            preparation = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let made = try await BlindLiveComparison.makeSystemService(
+                        player: system, a: a, b: b, kind: self.mode.kind, trialCount: self.trialCount, switchHold: self.switchHold)
+                    self.adopt(made, a: a, b: b)
+                } catch {
+                    self.error = error.localizedDescription
+                }
+                self.isPreparing = false
+            }
+            return
+        }
+        do {
+            adopt(try BlindLiveComparison.makeService(player: player, a: a, b: b, kind: mode.kind, trialCount: trialCount, switchHold: switchHold), a: a, b: b)
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    func awaitPreparation() async { await preparation?.value }
+
+    private func adopt(_ made: BlindComparisonService, a: ComparisonCandidate, b: ComparisonCandidate) {
+        names = (a.name, b.name)
+        recorded = false
+        finishedRecord = nil
+        forwarding = made.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            // The published change fires before the new value lands, so read it on the next turn.
+            Task { @MainActor [weak self] in self?.recordIfFinished() }
+        }
+        service = made
+        error = nil
     }
 
     /// Keeps the result in History once, as soon as the trials are in (can-I-hear-it: at the reveal question).
@@ -99,9 +155,11 @@ final class BlindLiveModel: ObservableObject {
 
     /// Ends the test and puts the applied settings back.
     func stop() {
+        preparation?.cancel()
         service?.close()
         service = nil
         forwarding = nil
+        confirmFullRangeBass = false
     }
 }
 
@@ -119,7 +177,7 @@ struct ProductionBlindLiveView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
-            Text("Play your own music through the app, then try to tell two settings apart, or say which you prefer. Level is matched first: the louder side is turned down, never the quieter one turned up. The equaliser, preamp and dynamics are what change between sides; room correction, bass management and output protection stay on for both.")
+            Text("Play your own music through the app, then try to tell two settings apart, or say which you prefer. Level is matched first: the louder side is turned down, never the quieter one turned up. Sides can be content settings (equaliser, preamp, dynamics), a saved system profile, or everything off. \"Everything off\" never turns off output protection, speaker-driver processing, a bi-amp or tri-amp splitter, routing or master volume. Output protection stays on for every side.")
                 .foregroundStyle(.secondary)
             if let service = model.service {
                 BlindLiveRunView(service: service, kind: model.mode.kind, record: model.finishedRecord, onExport: {
@@ -168,9 +226,20 @@ struct ProductionBlindLiveView: View {
             }
             .frame(maxWidth: 230)
             Text(model.guidance).font(DesignType.caption.font).foregroundStyle(.secondary)
-            Button("Start blind test") { model.start() }
-                .buttonStyle(.glassProminent)
-                .disabled(!model.canStart)
+            if model.needsFullRangeBassConfirmation {
+                Toggle("My main speakers can take full-range bass (room correction and bass management go off, so the bass reaches them whole)", isOn: $model.confirmFullRangeBass)
+                    .onChange(of: model.confirmFullRangeBass) { _, _ in model.reload() }
+                if !model.confirmFullRangeBass {
+                    Text("Without this, \"Everything off\" keeps bass management on and turns off everything else.")
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Button("Start blind test") { model.start() }
+                    .buttonStyle(.glassProminent)
+                    .disabled(!model.canStart)
+                if model.isPreparing { ProgressView().controlSize(.small); Text("Preparing both sides…").font(DesignType.caption.font) }
+            }
             Text("Playback must be running. The test never starts playback, and it puts your settings back when it ends.")
                 .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
@@ -180,13 +249,13 @@ struct ProductionBlindLiveView: View {
 
     @ViewBuilder private var pickers: some View {
         Picker("A", selection: $model.sideAID) {
-            ForEach(model.candidates) { Text($0.name).tag($0.id) }
+            ForEach(model.candidates) { Text(model.label($0)).tag($0.id).selectionDisabled($0.unavailableReason != nil) }
         }
-        .frame(maxWidth: 280)
+        .frame(maxWidth: 320)
         Picker("B", selection: $model.sideBID) {
-            ForEach(model.candidates) { Text($0.name).tag($0.id) }
+            ForEach(model.candidates) { Text(model.label($0)).tag($0.id).selectionDisabled($0.unavailableReason != nil) }
         }
-        .frame(maxWidth: 280)
+        .frame(maxWidth: 320)
     }
 }
 

@@ -197,6 +197,25 @@ struct HeadroomModel {
         }
     }
 
+    /// The total weighted level of the graph (E12 S28b2, blind-listening level match). Sums the pink-noise power of every
+    /// output lane that carries sound, relative to a flat unity chain on that lane, so a flat two-lane chain reads 2.0
+    /// (twice the one-lane power). `incomplete` names stages the model could not describe: the level is then approximate.
+    /// Electrical model only: no room, no ear.
+    func analyseLevel() -> (powerRatio: Double, incomplete: [String])? {
+        let lanes = walk()
+        var total = 0.0
+        var incomplete = Set<String>()
+        for index in 0..<min(laneCount, lanes.count) {
+            let lane = lanes[index]
+            incomplete.formUnion(lane.incomplete)
+            if lane.silent { continue }
+            guard let result = evaluateLevel(paths: lane.paths, tail: lane.tail) else { return nil }
+            total += result.power_ratio
+        }
+        guard total > 0, total.isFinite else { return nil }
+        return (total, incomplete.sorted())
+    }
+
     /// The lowest ceiling of a limiter stage that covers `lane` (the user limiter when on, and the hard limit).
     private func ceilingDB(lane: Int) -> Double {
         var ceiling = 0.0
@@ -652,6 +671,25 @@ struct HeadroomModel {
     // MARK: Core call
 
     private func evaluate(paths: [Path], tail: [Stage], ceiling: Double) -> n60_headroom_result? {
+        withCOutput(paths: paths, tail: tail, ceiling: ceiling) { output in
+            var result = n60_headroom_result()
+            result.struct_size = UInt32(MemoryLayout<n60_headroom_result>.size)
+            return n60_headroom_evaluate(output, &result) == N60_HEADROOM_OK ? result : nil
+        }
+    }
+
+    /// One output's K-weighted pink-noise power relative to a flat unity chain (E12 S28b2; the core does the maths).
+    private func evaluateLevel(paths: [Path], tail: [Stage]) -> n60_headroom_level_result? {
+        withCOutput(paths: paths, tail: tail, ceiling: 0) { output in
+            var result = n60_headroom_level_result()
+            result.struct_size = UInt32(MemoryLayout<n60_headroom_level_result>.size)
+            return n60_headroom_weighted_level(output, &result) == N60_HEADROOM_OK ? result : nil
+        }
+    }
+
+    private func withCOutput<T>(
+        paths: [Path], tail: [Stage], ceiling: Double, _ body: (UnsafePointer<n60_headroom_output>) -> T?
+    ) -> T? {
         let lane = (paths: paths, tail: tail)
         guard (1...64).contains(lane.paths.count), lane.tail.count <= 64 else { return nil }
         var owned: [UnsafeMutableRawPointer] = []
@@ -684,9 +722,6 @@ struct HeadroomModel {
             struct_size: UInt32(MemoryLayout<n60_headroom_output>.size), sample_rate: spec.sampleRate,
             strict: strict ? 1 : 0, path_count: UInt32(lane.paths.count), paths: UnsafePointer(pathBuffer),
             tail_stage_count: UInt32(lane.tail.count), tail_stages: cStages(lane.tail), ceiling_db: ceiling)
-        var result = n60_headroom_result()
-        result.struct_size = UInt32(MemoryLayout<n60_headroom_result>.size)
-        guard n60_headroom_evaluate(&output, &result) == N60_HEADROOM_OK else { return nil }
-        return result
+        return withUnsafePointer(to: &output) { body($0) }
     }
 }

@@ -12,17 +12,31 @@ import Foundation
 
 /// What can be heard as A or B.
 struct ComparisonCandidate: Identifiable, Equatable, Sendable {
-    enum Kind: Equatable, Sendable { case current, processingOff, preset(UUID) }
+    enum Kind: Equatable, Sendable { case current, processingOff, preset(UUID), everythingOff, system(UUID) }
 
     var kind: Kind
     var name: String
     var state: ContentABAuditionState
+    /// E12 S28b2: what a system side plays besides its content settings (room correction, bass management); nil for a
+    /// content side.
+    var systemOverride: AuditionOverride?
+    /// Non-nil when the side is listed greyed: the plain-words reason it cannot be chosen now.
+    var unavailableReason: String?
+
+    var isSystemSide: Bool {
+        switch kind {
+        case .everythingOff, .system: return true
+        case .current, .processingOff, .preset: return false
+        }
+    }
 
     var id: String {
         switch kind {
         case .current: return "current"
         case .processingOff: return "off"
         case .preset(let id): return id.uuidString
+        case .everythingOff: return ComparisonCandidates.everythingOffID
+        case .system(let id): return "system-\(id.uuidString)"
         }
     }
 }
@@ -64,8 +78,15 @@ protocol ContentAuditionPlaying: ComparisonEngine {
     func currentContentState() -> ContentABAuditionState
     /// The output device's sample rate the level model is evaluated at.
     var outputSampleRate: Double { get }
+    /// Called once when a test is built: remembers the output, rate, settings and override the test started with, so a
+    /// change made elsewhere ends it. No-op by default.
+    func beginSession()
     /// Moves the running graph to `state`, with `attenuationDB` (zero or negative) taken off the input.
     func apply(_ state: ContentABAuditionState, attenuationDB: Double) throws
+}
+
+extension ContentAuditionPlaying {
+    func beginSession() {}
 }
 
 @MainActor
@@ -136,6 +157,10 @@ final class LiveComparisonEngine: ComparisonEngine {
 final class ProfileContentAuditionPlayer: ContentAuditionPlaying {
     private let profiles: ProductProfileController
     private let outputUID: String?
+    /// E12 S28b2: what the running test started from; a difference at any later poll ends it and restores.
+    private var session: (rate: Double, system: PlaybackSystemState, content: ContentABAuditionState)?
+    /// The override the player last applied; another opener of the audition slot makes the engine's differ from it.
+    private var appliedOverride: AuditionOverride?
 
     init(profiles: ProductProfileController) {
         self.profiles = profiles
@@ -148,8 +173,33 @@ final class ProfileContentAuditionPlayer: ContentAuditionPlaying {
         if profiles.eqComparison.isComparing || profiles.eqComparison.contentABActive() {
             return "Finish the Equalizer or content A/B comparison first."
         }
+        if let endedReason { return endedReason }
+        guard let session else { return nil }
+        if profiles.engine.auditionOverride != appliedOverride { return "Another comparison opened, so the test ended." }
+        if outputSampleRate != session.rate { return "The sample rate changed, so the comparison ended." }
+        if appliedOverride.map({ $0.roomCorrection != .applied || $0.bassManagement != nil }) == true,
+           let refusal = profiles.engine.auditionSystemDomainsRefusal {
+            return refusal
+        }
+        if profiles.captureSystemState() != session.system || currentContentState() != session.content {
+            return "Settings were changed elsewhere, so the comparison ended."
+        }
         return nil
     }
+
+    func beginSession() {
+        session = (outputSampleRate, profiles.captureSystemState(), currentContentState())
+        appliedOverride = profiles.engine.auditionOverride
+        endedReason = nil
+        // A live treatment about to arm asks the open system test to end and restore first (design note 7).
+        profiles.engine.auditionEndRequest = { [weak self] in
+            guard let self, let session = self.session, self.profiles.engine.auditionOverride != nil else { return }
+            try? self.apply(session.content, attenuationDB: 0)
+            self.endedReason = "Room treatment was turned on, so the comparison ended."
+        }
+    }
+
+    private var endedReason: String?
 
     var isSwitching: Bool { profiles.engine.graphRebuildInProgress }
     var outputSampleRate: Double { profiles.engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
@@ -162,6 +212,32 @@ final class ProfileContentAuditionPlayer: ContentAuditionPlaying {
     func restoreApplied() throws {}
 
     func apply(_ state: ContentABAuditionState, attenuationDB: Double) throws {
-        try profiles.engine.transitionContentAuditionState(state, additionalInputAttenuationDB: attenuationDB)
+        try applySide(content: state, attenuationDB: attenuationDB, override: nil)
+    }
+}
+
+extension ProfileContentAuditionPlayer: SystemAuditionPlaying {
+    var systemContext: SystemAuditionContext? {
+        let engine = profiles.engine
+        guard engine.lifecycleState == .running, engine.liveGraphEditsAvailable, let layout = engine.auditionLayout else { return nil }
+        return SystemAuditionContext(
+            running: profiles.captureSystemState(), speakerRouting: engine.speakerRoutingConfiguration,
+            programLanes: layout.programLanes, subwoofers: layout.subwoofers, refusal: engine.auditionSystemDomainsRefusal)
+    }
+
+    func analyse(content: ContentABAuditionState, override: AuditionOverride?) async throws -> AuditionSideAnalysis {
+        let spec = try profiles.engine.auditionSideSpec(content: content, override: override)
+        return try await AuditionSideAnalyser.analyse(spec: spec)
+    }
+
+    func applySide(content: ContentABAuditionState, attenuationDB: Double, override: AuditionOverride?) throws {
+        do {
+            try profiles.engine.applyAuditionSide(content: content, attenuationDB: attenuationDB, override: override)
+            appliedOverride = override
+        } catch {
+            // A restore must always clear the slot, even when the republish itself fails.
+            if override == nil { profiles.engine.auditionOverride = nil; appliedOverride = nil }
+            throw error
+        }
     }
 }

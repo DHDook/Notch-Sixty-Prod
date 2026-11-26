@@ -84,6 +84,8 @@ final class MIMOGraphTreatment: ObservableObject {
     }
 
     let arm = LiveTreatmentArm(feature: .mimoRoomTreatment)
+    /// E12 S28b2: called just before the switch is armed, so an open blind comparison ends and restores first.
+    var willArm: (@MainActor () -> Void)?
 
     @Published private(set) var stage: UnifiedGraphMIMOStage?
     @Published private(set) var permit: Permit?
@@ -249,6 +251,7 @@ final class MIMOGraphTreatment: ObservableObject {
     /// authority differs (`gateFailure` needs a permit, `probeGateFailure` a live ticket).
     func armStage(context initial: Context, refresh: (() -> Context)?, probe: Bool) async throws {
         var context = initial
+        willArm?()  // E12 S28b2: an open system comparison ends and restores before anything else changes
         func gates(_ context: Context) -> ArmRefusal? { probe ? probeGateFailure(context) : gateFailure(context) }
         guard !arm.isArmed else { throw ArmRefusal.alreadyArmed }
         if let failure = gates(context) { lastRefusal = failure; throw failure }

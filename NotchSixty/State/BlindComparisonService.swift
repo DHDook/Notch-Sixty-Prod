@@ -27,6 +27,9 @@ struct ComparisonLevelMatch: Equatable, Sendable {
     var remainingDifferenceDB: Double
     /// True when either side has active dynamics: its level then depends on the program, so the match is a guess.
     var isApproximate: Bool
+    /// E12 S28b2: the level came from the electrical model of the whole graph (room correction and bass included), so it
+    /// is approximate by construction: no room, no ear. The at-seat check is an E22 bench item.
+    var isElectricalModel = false
 
     enum Side: Equatable, Sendable { case a, b }
 
@@ -82,6 +85,9 @@ struct ComparisonLevelMatch: Equatable, Sendable {
     /// Sentence for the page: what was turned down and what difference remains.
     var summary: String {
         let trim = max(abs(trimADB), abs(trimBDB))
+        if isElectricalModel {
+            return String(format: "Level matched by the electrical model of both systems, approximate: the louder side is turned down by %.1f dB. It cannot include your room or your ears.", trim)
+        }
         var text = String(format: "Level matched within %.2f dB (the louder side is turned down by %.1f dB).", remainingDifferenceDB, trim)
         if isApproximate { text += " Approximate: dynamics processing makes the level depend on the music." }
         return text
