@@ -44,28 +44,28 @@ final class RealtimeStageContractTests: XCTestCase {
     // bit-identical to input, with no residue from the head-shadow filter.
     func testDisabledSpeakerStagesBecomeBitTransparentAtEveryRate() throws {
         for sampleRate in Self.standardSampleRates {
-            let kernel = try XCTUnwrap(N60RenderKernelCreate())
-            defer { N60RenderKernelDestroy(kernel) }
+            let kernel = try XCTUnwrap(GraphStereoRig.create())
+            defer { kernel.destroy() }
 
             var enabled = N60DSPGraphSnapshotMakeUnity(sampleRate)
             XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&enabled, 0.5, true))
             XCTAssertTrue(N60DSPGraphSnapshotSetCrosstalkCancellation(&enabled, 0.5, 700, true))
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, enabled))
+            XCTAssertTrue(kernel.publish(enabled))
             var left: Float = 0
             var right: Float = 0
             let oneSecond = Int(sampleRate)
             for frame in 0..<(oneSecond / 4) {
-                N60RenderKernelProcessStereoFrame(kernel, signal(frame, 0), signal(frame, 1), &left, &right)
+                kernel.processFrame(signal(frame, 0), signal(frame, 1), &left, &right)
             }
             XCTAssertNotEqual(left, signal(oneSecond / 4 - 1, 0), "\(sampleRate) Hz: stages were active")
 
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, N60DSPGraphSnapshotMakeUnity(sampleRate)))
+            XCTAssertTrue(kernel.publish(N60DSPGraphSnapshotMakeUnity(sampleRate)))
             for frame in 0..<oneSecond {
-                N60RenderKernelProcessStereoFrame(kernel, signal(frame, 0), signal(frame, 1), &left, &right)
+                kernel.processFrame(signal(frame, 0), signal(frame, 1), &left, &right)
             }
             var mismatches = 0
             for frame in oneSecond..<(oneSecond + 4_096) {
-                N60RenderKernelProcessStereoFrame(kernel, signal(frame, 0), signal(frame, 1), &left, &right)
+                kernel.processFrame(signal(frame, 0), signal(frame, 1), &left, &right)
                 if left != signal(frame, 0) || right != signal(frame, 1) { mismatches += 1 }
             }
             XCTAssertEqual(mismatches, 0, "\(sampleRate) Hz: disabled stages must be bit-transparent")

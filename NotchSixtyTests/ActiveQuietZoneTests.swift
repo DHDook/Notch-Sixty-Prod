@@ -679,45 +679,74 @@ final class ActiveQuietZoneTests: XCTestCase {
             cTone(frequency: 63, leftReal: tonePeak, rightReal: tonePeak),
         ]
 
+        GraphStereoRig.suspendOutputProtection()
+        defer { GraphStereoRig.restoreOutputProtection() }
         for rate in rates {
-            func peak(protected: Bool) throws -> (output: Float, frames: Int) {
-                let kernel = try XCTUnwrap(N60RenderKernelCreate())
-                defer { N60RenderKernelDestroy(kernel) }
-                var graph = N60DSPGraphSnapshotMakeUnity(rate)
-                XCTAssertTrue(
-                    N60DSPGraphSnapshotSetActiveQuietZone(&graph, &tones, UInt32(tones.count), 256, true),
-                    "\(rate) Hz: tones at the amplitude cap were rejected"
-                )
+            // E23 T1: rendered through the unified graph, as the stereo Quiet Zone feed runs in the app (the feed sits
+            // after the program lanes and before the final protection).
+            func peak(protected: Bool) throws -> Float {
+                var configuration = UnifiedGraphConfiguration(
+                    sampleRate: rate, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+                configuration.ancActuators = UnifiedGraphAncActuators(
+                    actuators: [.init(targetLane: 0), .init(targetLane: 1)], captureFrames: 4096,
+                    hostFed: true, stereoDirect: true, externalLatencyFrames: 0)
+                configuration.ancActuators?.authorised = true
                 if protected {
-                    var protection = N60ProtectionSnapshotMakeBypassed(rate)
-                    XCTAssertTrue(N60ProtectionSnapshotSetLimiter(&protection, true, ceilingDB, 0.1, 50, 2))
-                    graph.protection = protection
+                    configuration.protection = UnifiedGraphProtection(
+                        limiterEnabled: true, ceilingDB: Double(ceilingDB), attackMilliseconds: 0.1,
+                        releaseMilliseconds: 50, lookAheadMilliseconds: 2, truePeakGuard: false, oversampling: 1)
                 }
-                XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph), "\(rate) Hz")
+                let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+                let feed = try XCTUnwrap(ProfileAncFeed(stereoSampleRate: rate, peakLimit: 1, fadeInSeconds: 0.02))
+                let raw = try XCTUnwrap(host.rawGraph)
+                let process = unsafeBitCast(
+                    N60AncLaneFeedProcess as @convention(c) (
+                        UnsafeMutableRawPointer?, UnsafePointer<UnsafePointer<Float>>,
+                        UnsafePointer<UnsafeMutablePointer<Float>>, UInt32, UInt32
+                    ) -> Int32,
+                    to: n60_external_process_fn.self)
+                XCTAssertEqual(n60_graph_set_external_processor(
+                    OpaquePointer(raw), process, UnsafeMutableRawPointer(feed.pointer), feed.channels), N60_STATUS_OK)
+                host.retainedResource = feed
 
-                let frames = Int(rate / 2)
+                var snapshot = N60ActiveQuietZoneSnapshotMakeBypassed()
+                XCTAssertTrue(
+                    N60ActiveQuietZoneSnapshotSet(&snapshot, &tones, UInt32(tones.count), 64, rate, true),
+                    "\(rate) Hz: tones at the amplitude cap were rejected")
+                snapshot.armGeneration = 1
+                XCTAssertTrue(N60AncLaneFeedSetTonalSnapshot(feed.pointer, &snapshot))
+                N60AncLaneFeedArm(feed.pointer)
+                N60AncLaneFeedRenewLease(feed.pointer, UInt64(rate * 600))
+
+                let block = 480
+                let frames = Int(rate / 2) / block * block
                 let settle = Int(rate / 10)
-                var left: Float = 0
-                var right: Float = 0
                 var outputPeak: Float = 0
-                for frame in 0..<frames {
-                    // Near-full-scale program a few hertz off the anti-noise
-                    // tones, so the sum regularly peaks above full scale.
-                    let program = Float(0.97 * sin(2 * Double.pi * 51 * Double(frame) / rate))
-                    N60RenderKernelProcessStereoFrame(kernel, program, program, &left, &right)
-                    if frame >= settle { outputPeak = max(outputPeak, abs(left), abs(right)) }
+                var frame = 0
+                while frame < frames {
+                    // Near-full-scale program a few hertz off the anti-noise tones, so the sum regularly peaks above
+                    // full scale.
+                    let program = (0..<block).map {
+                        Float(0.97 * sin(2 * Double.pi * 51 * Double(frame + $0) / rate))
+                    }
+                    let input = [program, program] + [[Float]](repeating: [Float](repeating: 0, count: block), count: 3)
+                    let out = try host.processOffline(input: input, frames: block)
+                    if frame >= settle {
+                        outputPeak = max(outputPeak, out[0].map { abs($0) }.max() ?? 0, out[1].map { abs($0) }.max() ?? 0)
+                    }
+                    frame += block
                 }
-                return (outputPeak, frames)
+                return outputPeak
             }
 
             let unprotected = try peak(protected: false)
             XCTAssertGreaterThan(
-                unprotected.output, 1.0,
+                unprotected, 1.0,
                 "\(rate) Hz: program plus anti-noise did not exceed full scale, so the limit is untested"
             )
             let protected = try peak(protected: true)
             XCTAssertLessThanOrEqual(
-                protected.output, ceiling + 5.0e-4,
+                protected, ceiling + 5.0e-4,
                 "\(rate) Hz: Quiet Zone injection escaped final protection"
             )
         }

@@ -209,13 +209,13 @@ final class UnifiedGraphBypassAuditionTests: XCTestCase {
             let input = noise(8_192, amplitude: 0.1)
             let graph = try render(host, input)
 
-            let kernel = try XCTUnwrap(N60RenderKernelCreate())
-            defer { N60RenderKernelDestroy(kernel) }
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
+            let kernel = try XCTUnwrap(GraphStereoRig.create())
+            defer { kernel.destroy() }
+            XCTAssertTrue(kernel.publish(snapshot))
             var worst = 0.0
             for (index, sample) in input.enumerated() {
                 var left: Float = 0, right: Float = 0
-                N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+                kernel.processFrame(sample, sample, &left, &right)
                 if index > 2_048 { worst = max(worst, Double(abs(left - graph[index]))) }
             }
             XCTAssertLessThan(worst, 2e-3, "wide EQ parity at \(rate)")
