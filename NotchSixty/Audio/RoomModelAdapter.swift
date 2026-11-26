@@ -8,6 +8,8 @@ struct RoomModelAdapterInput: Sendable {
     var library: [MeasurementRecord] = []
     var combinedAncRecords: [CombinedAncPathRecord] = []
     var surveyPoints: [QuietZoneSurveyedPosition] = []
+    /// E29 S7: the head-follow survey's saved seats, which carry coordinates but no impulse responses (point-only).
+    var surveyCoordinates: [RoomSurveyCoordinate] = []
     /// Stamps the current project knows for records that carry none of their own (the output device and arrangement
     /// revision are not stored on legacy records; they are checked only when a record has them).
     var timingTierForPositions: RoomTimingTier = .none
@@ -60,10 +62,12 @@ enum RoomModelAdapter {
                 let origin = RoomPathOrigin.roomCorrectionPosition(id: p.id, channel: channel)
                 paths.append(RoomPath(
                     id: RoomModelID.stable("path", "\(origin)"), source: feed, receiver: seat, origin: origin,
-                    sampleRate: p.sampleRate, timingTier: input.timingTierForPositions, sessionID: nil,
+                    sampleRate: p.sampleRate, timingTier: p.captureStamp?.timingTier.map { RoomTimingTier(storedName: $0) } ?? input.timingTierForPositions,
+                    sessionID: p.captureStamp?.sessionID,
                     bandLowHz: m.quality.usableLowHz, bandHighHz: m.quality.usableHighHz, windowSeconds: nil,
                     stamps: RoomPathStamps(
-                        bassFingerprint: p.ancBassFingerprint, outputGainDB: p.outputGainDBAtMeasurement),
+                        bassFingerprint: p.ancBassFingerprint, arrangementRevision: p.captureStamp?.arrangementRevision,
+                        outputDeviceUID: p.captureStamp?.outputDeviceUID, outputGainDB: p.outputGainDBAtMeasurement),
                     date: m.capturedAt,
                     hasImpulseResponse: !m.impulseResponse.isEmpty || !m.rawCapture.isEmpty,
                     qualityOK: m.quality.sweepComplete && !m.quality.clipped))
@@ -114,6 +118,13 @@ enum RoomModelAdapter {
             let name = "Survey point \(i + 1)"
             let id = RoomModelID.stable("point.survey", "\(i)|\(s.x)|\(s.y)|\(s.z)")
             _ = ensure(.surveyPoint, name, id: id, position: RoomPosition(x: s.x, y: s.y, z: s.z, source: .typed, uncertaintyMetres: nil))
+        }
+
+        // A survey point carries virtual-microphone ratios, not an impulse response, so it stays point-only (E29 G3).
+        for (i, c) in input.surveyCoordinates.enumerated() {
+            let name = "Survey seat \(i + 1)"
+            let id = RoomModelID.stable("point.survey", "saved|\(i)|\(c.x)|\(c.y)|\(c.z)")
+            _ = ensure(.surveyPoint, name, id: id, position: RoomPosition(x: c.x, y: c.y, z: c.z, source: .typed, uncertaintyMetres: nil))
         }
 
         return RoomModel(points: order.compactMap { points[$0] }, paths: paths)

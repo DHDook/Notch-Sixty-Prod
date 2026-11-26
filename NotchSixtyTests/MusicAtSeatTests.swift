@@ -75,13 +75,18 @@ final class MusicAtSeatTests: XCTestCase {
         return 10 * log10(power)
     }
 
+    /// The microphone sits at the reference seat: its level is the programme level at the feed plus the reference path,
+    /// so the test builds the microphone-scale programme from a known feed level and the reference impulse response.
     func testPredictedBandLevelsMatchTheConvolutionAtEveryRate() throws {
+        let referenceIR = delta(0.5, at: 30)
         let ir = delta(0.35, at: 40)
         let programmeAmplitude = 0.2
-        let programmeDB = 10 * log10(programmeAmplitude * programmeAmplitude / 2)
         for rate in Self.rates {
             let seat = try XCTUnwrap(RoomModelInterpolator.measured(impulseResponse: ir, sampleRate: rate))
-            let input = MusicAtSeatInput(programmeBandLevelsDB: Array(repeating: programmeDB, count: centres.count), seat: seat)
+            let reference = try XCTUnwrap(RoomModelInterpolator.measured(impulseResponse: referenceIR, sampleRate: rate))
+            // What the analysis microphone reads: the programme through the reference path (dBFS).
+            let atMic = centres.map { convolvedLevelDB(centre: $0, rate: rate, ir: referenceIR, amplitude: programmeAmplitude) }
+            let input = MusicAtSeatInput(programmeBandLevelsDB: atMic, reference: reference, seat: seat)
             let prediction = try MusicAtSeatPredictor.predict(input).get()
             XCTAssertFalse(prediction.derived)
             for (i, centre) in centres.enumerated() {
@@ -91,34 +96,53 @@ final class MusicAtSeatTests: XCTestCase {
         }
     }
 
-    func testOutputGainChangeSincePathMeasuredIsAdded() throws {
+    func testTheScaleComesFromTheMicrophoneNotFromTheCoreReference() throws {
+        // A seat identical to the reference reads exactly the microphone's own levels, whatever the core's reference is.
+        let seat = try XCTUnwrap(RoomModelInterpolator.measured(impulseResponse: delta(0.01), sampleRate: 48_000))
+        let atMic = (0..<centres.count).map { -40.0 + Double($0) }
+        let prediction = try MusicAtSeatPredictor.predict(
+            MusicAtSeatInput(programmeBandLevelsDB: atMic, reference: seat, seat: seat)).get()
+        for i in 0..<centres.count { XCTAssertEqual(prediction.bandLevelsDB[i], atMic[i], accuracy: 1e-9) }
+    }
+
+    func testAGainDifferenceBetweenTheTwoMeasurementsIsRemoved() throws {
         let seat = try XCTUnwrap(RoomModelInterpolator.measured(impulseResponse: delta(1), sampleRate: 48_000))
-        var input = MusicAtSeatInput(programmeBandLevelsDB: Array(repeating: -30, count: centres.count), seat: seat)
+        var input = MusicAtSeatInput(
+            programmeBandLevelsDB: Array(repeating: -30, count: centres.count), reference: seat, seat: seat)
         let base = try MusicAtSeatPredictor.predict(input).get().bandLevelsDB[0]
-        input.currentOutputGainDB = -12
-        input.measuredOutputGainDB = -18
-        XCTAssertEqual(try MusicAtSeatPredictor.predict(input).get().bandLevelsDB[0] - base, 6, accuracy: 1e-9)
+        // The seat was measured 6 dB louder than the reference, so the seat is 6 dB too strong in the comparison.
+        input.measuredOutputGainDB = -12
+        input.referenceMeasuredOutputGainDB = -18
+        XCTAssertEqual(try MusicAtSeatPredictor.predict(input).get().bandLevelsDB[0] - base, -6, accuracy: 1e-9)
         input.measuredOutputGainDB = nil
         XCTAssertEqual(try MusicAtSeatPredictor.predict(input).get().bandLevelsDB[0], base, accuracy: 1e-9)
     }
 
     func testFallbackWhenConfidenceIsLowMissingStaleOrUnavailable() throws {
         var seat = try XCTUnwrap(RoomModelInterpolator.measured(impulseResponse: delta(0.5), sampleRate: 48_000))
+        let reference = seat
         let programme = Array(repeating: -30.0, count: centres.count)
-        XCTAssertEqual(MusicAtSeatPredictor.predict(MusicAtSeatInput(programmeBandLevelsDB: programme, seat: nil)),
-                       .failure(.noSeatResponse))
-        XCTAssertEqual(MusicAtSeatPredictor.predict(MusicAtSeatInput(programmeBandLevelsDB: [1, 2], seat: seat)),
-                       .failure(.invalidProgramme))
-        XCTAssertEqual(MusicAtSeatPredictor.predict(
-            MusicAtSeatInput(programmeBandLevelsDB: programme, seat: seat, seatPathStale: true)), .failure(.stalePath))
+        func input(_ p: [Double], _ s: RoomBandResponse?, ref: RoomBandResponse? = reference) -> MusicAtSeatInput {
+            MusicAtSeatInput(programmeBandLevelsDB: p, reference: ref, seat: s)
+        }
+        XCTAssertEqual(MusicAtSeatPredictor.predict(input(programme, nil)), .failure(.noSeatResponse))
+        XCTAssertEqual(MusicAtSeatPredictor.predict(input([1, 2], seat)), .failure(.invalidProgramme))
+        XCTAssertEqual(MusicAtSeatPredictor.predict(input(programme, seat, ref: nil)), .failure(.noReference))
+        var derivedReference = reference
+        derivedReference.origin = .derived(neighboursUsed: 3)
+        XCTAssertEqual(MusicAtSeatPredictor.predict(input(programme, seat, ref: derivedReference)), .failure(.noReference))
+        var stale = input(programme, seat)
+        stale.seatPathStale = true
+        XCTAssertEqual(MusicAtSeatPredictor.predict(stale), .failure(.stalePath))
+        stale.seatPathStale = false
+        stale.referencePathStale = true
+        XCTAssertEqual(MusicAtSeatPredictor.predict(stale), .failure(.stalePath))
         var low = seat
         low.confidence = low.confidence.map { _ in 0.2 }
-        XCTAssertEqual(MusicAtSeatPredictor.predict(MusicAtSeatInput(programmeBandLevelsDB: programme, seat: low)),
-                       .failure(.lowConfidence))
+        XCTAssertEqual(MusicAtSeatPredictor.predict(input(programme, low)), .failure(.lowConfidence))
         let k = try XCTUnwrap(seat.bandIndex(nearest: 1_000))
         seat.available[k] = false
-        XCTAssertEqual(MusicAtSeatPredictor.predict(MusicAtSeatInput(programmeBandLevelsDB: programme, seat: seat)),
-                       .failure(.bandUnavailable))
+        XCTAssertEqual(MusicAtSeatPredictor.predict(input(programme, seat)), .failure(.bandUnavailable))
     }
 
     // MARK: Conversation Focus input
@@ -135,7 +159,8 @@ final class MusicAtSeatTests: XCTestCase {
     func testBuilderUsesTheSeatPredictionOnlyWhenGiven() throws {
         let seat = try XCTUnwrap(RoomModelInterpolator.measured(impulseResponse: delta(0.5), sampleRate: 48_000))
         let prediction = try MusicAtSeatPredictor.predict(
-            MusicAtSeatInput(programmeBandLevelsDB: Array(repeating: -20, count: centres.count), seat: seat)).get()
+            MusicAtSeatInput(
+                programmeBandLevelsDB: Array(repeating: -20, count: centres.count), reference: seat, seat: seat)).get()
         let cuts = Array(repeating: 2.0, count: centres.count)
         func build(_ seatMusic: MusicAtSeatPrediction?) throws -> ConversationUnmaskingInput {
             try ConversationUnmaskingInputBuilder.build(

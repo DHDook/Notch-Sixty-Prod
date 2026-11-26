@@ -90,6 +90,13 @@ final class RoomSeatMapController {
     /// Estimated response into each unmeasured, positioned seat (left and right feed power-summed).
     private(set) var derivedResponses: [UUID: RoomBandResponse] = [:]
     private var libraryRecords: [MeasurementRecord] = []
+    /// E29 S7: live ANC path records and head-survey seats for the map (G11).
+    private var live = RoomModelLiveInputs()
+    /// E29 S7: the seat whose music Conversation Focus uses, and where it is published (nil: no feed in this host).
+    private(set) var focusSeatID: UUID?
+    private(set) var focusMessage: String?
+    private let seatMusicFeed: SeatMusicFeed?
+    private let defaults: UserDefaults
     /// Loads a measurement record's impulse response (the library in production; a fake in tests). E29 S5.
     private let impulseResponseLoader: (UUID) -> [Float]?
     /// The stereo feed calibration, for the locate delay cross-check. Display only.
@@ -99,8 +106,11 @@ final class RoomSeatMapController {
 
     init(
         projectStore: RoomCorrectionProjectStore, unit: RoomSeatMapUnit = .forLocale(),
-        impulseResponseLoader: @escaping (UUID) -> [Float]? = RoomSeatMapController.libraryLoader
+        impulseResponseLoader: @escaping (UUID) -> [Float]? = RoomSeatMapController.libraryLoader,
+        seatMusicFeed: SeatMusicFeed? = nil, defaults: UserDefaults = .standard
     ) {
+        self.seatMusicFeed = seatMusicFeed
+        self.defaults = defaults
         self.projectStore = projectStore
         self.unit = unit
         self.impulseResponseLoader = impulseResponseLoader
@@ -115,12 +125,19 @@ final class RoomSeatMapController {
 
     func load(
         project: RoomCorrectionProject, geometry: RoomGeometryModel?, context: RoomModelContext = RoomModelContext(),
-        library: [MeasurementRecord] = []
+        library: [MeasurementRecord] = [], live: RoomModelLiveInputs? = nil
     ) {
         self.project = project
         self.libraryRecords = library
+        self.live = live ?? RoomModelLiveInputs()
+        var context = context
+        // The staleness context (G10): everything the live app knows, so one rule judges every path.
+        context.outputDeviceUID = self.live.outputDeviceUID ?? context.outputDeviceUID
+        context.arrangementRevision = self.live.arrangementRevision ?? context.arrangementRevision
+        context.outputGainDB = self.live.outputGainDB ?? context.outputGainDB
         locateMessage = nil
         self.projectID = project.id
+        focusSeatID = defaults.string(forKey: Self.focusKey(project.id)).flatMap(UUID.init(uuidString:))
         self.geometry = geometry
         self.context = context
         entered = [:]
@@ -151,7 +168,9 @@ final class RoomSeatMapController {
 
     private func rebuild() {
         guard let project else { model = RoomModel(); return }
-        let built = RoomModelAdapter.build(RoomModelAdapterInput(positions: project.measurements, library: libraryRecords))
+        let built = RoomModelAdapter.build(RoomModelAdapterInput(
+            positions: project.measurements, library: libraryRecords, combinedAncRecords: live.ancPathRecords,
+            surveyCoordinates: live.headSurvey))
         let linked = linkedPointIDs
         let main = listenerID
         var base = built.points
@@ -172,7 +191,14 @@ final class RoomSeatMapController {
                     p.id == RoomModelAdapter.leftFeedID ? g.leftSpeaker
                     : p.id == RoomModelAdapter.rightFeedID ? g.rightSpeaker
                     : (p.id == main ? g.listener : nil)
-                if let s = src { q.position = RoomPosition(x: s.x, y: s.y, z: s.z, source: .typed, uncertaintyMetres: nil) }
+                if let s = src {
+                    // A located seat keeps its source and uncertainty while the geometry still holds its coordinates (G13).
+                    let kept = entered[p.id].flatMap {
+                        abs($0.x - s.x) < 1e-6 && abs($0.y - s.y) < 1e-6 && abs($0.z - s.z) < 1e-6 ? $0 : nil
+                    }
+                    q.position = RoomPosition(
+                        x: s.x, y: s.y, z: s.z, source: kept?.source ?? .typed, uncertaintyMetres: kept?.uncertaintyMetres)
+                }
             } else if let pos = entered[p.id] {
                 q.position = pos
             }
@@ -181,6 +207,7 @@ final class RoomSeatMapController {
         model = RoomModel(points: points, paths: built.paths)
         updateSizeWarning()
         refreshDerived()
+        publishSeatMusic()
     }
 
     private func updateSizeWarning() {
@@ -345,6 +372,9 @@ final class RoomSeatMapController {
             g.modifiedAt = Date()
             geometry = g
             updated = g
+            // Only a located fix keeps its own record (source and uncertainty, G13); a typed move lives in the geometry.
+            if source == .typed { entered[id] = nil } else { entered[id] = pos }
+            if source != .typed || !entered.isEmpty { persist() }
         } else {
             entered[id] = pos
             persist()
@@ -375,24 +405,102 @@ final class RoomSeatMapController {
         return setPosition(id, x: p.x + dx, y: p.y + dy, z: nil)
     }
 
+    // MARK: Music at the seat for Conversation Focus (E29 S7)
+
+    private static func focusKey(_ project: UUID) -> String { "e29.focusSeat.\(project.uuidString)" }
+
+    /// Chooses (or clears, with nil) the seat whose music Conversation Focus uses. Stored per project.
+    func setFocusSeat(_ id: UUID?) {
+        focusSeatID = id
+        if let projectID {
+            if let id { defaults.set(id.uuidString, forKey: Self.focusKey(projectID)) }
+            else { defaults.removeObject(forKey: Self.focusKey(projectID)) }
+        }
+        publishSeatMusic()
+    }
+
+    /// The response into a seat from both feeds, from its newest usable measured paths; derived seats use the
+    /// estimate. `stale` is true when the newest path reads stale for the music estimate; `gainDB` is the output
+    /// gain stamped on it. The output-gain staleness check is left out of the music context on purpose: the
+    /// programme levels are live, so a volume change since the measurement needs no correction, only a difference
+    /// between the seat's and the reference's own stamps.
+    private func seatResponse(_ seat: UUID) -> (response: RoomBandResponse, stale: Bool, gainDB: Double?)? {
+        if let derived = derivedResponses[seat] { return (derived, false, nil) }
+        var musicContext = context
+        musicContext.outputGainDB = nil
+        var perFeed: [RoomBandResponse] = []
+        var stale = false
+        var gain: Double?
+        for feed in model.points where feed.kind == .speakerFeed {
+            let candidates = model.paths(from: feed.id, to: seat).filter { $0.hasImpulseResponse && $0.qualityOK }
+            guard let path = candidates.max(by: { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }),
+                  let ir = impulseResponse(of: path),
+                  let response = RoomModelInterpolator.measured(impulseResponse: ir, sampleRate: path.sampleRate)
+            else { continue }
+            if RoomModelRule.state(of: path, in: musicContext) != .measured { stale = true }
+            gain = gain ?? path.stamps.outputGainDB
+            perFeed.append(response)
+        }
+        guard !perFeed.isEmpty, let both = RoomBandResponse.powerSum(perFeed) else { return nil }
+        return (both, stale, gain)
+    }
+
+    private func impulseResponse(of path: RoomPath) -> [Float]? {
+        switch path.origin {
+        case .measurementRecord(let id): return impulseResponseLoader(id)
+        case .roomCorrectionPosition(let id, let channel):
+            guard let m = project?.measurements.first(where: { $0.id == id }) else { return nil }
+            let ir = channel == "left" ? m.left.impulseResponse : m.right.impulseResponse
+            return ir.isEmpty ? nil : ir
+        default: return nil
+        }
+    }
+
+    /// Publishes the chosen seat to the Conversation Focus feed, or withdraws it (today's analysis-microphone
+    /// prediction) when none is chosen or the reference seat cannot be read.
+    private func publishSeatMusic() {
+        focusMessage = nil
+        guard let feed = seatMusicFeed else { return }
+        guard let id = focusSeatID, let seat = model.point(id), seat.kind == .seat else {
+            feed.publish(nil)
+            return
+        }
+        guard let reference = seatResponse(listenerID), !reference.response.isDerived,
+              let target = seatResponse(id) else {
+            feed.publish(nil)
+            focusMessage = "Conversation Focus keeps its microphone estimate: the seat or the main seat has no measurement."
+            return
+        }
+        feed.publish(SeatMusicFeed.Source(
+            seatName: seat.name, seat: target.response, reference: reference.response,
+            seatPathStale: target.stale, referencePathStale: reference.stale,
+            seatMeasuredGainDB: target.gainDB, referenceMeasuredGainDB: reference.gainDB))
+        if target.stale || reference.stale { focusMessage = RoomModelRule.staleMessage }
+    }
+
     // MARK: Acoustic locate (E29 S5)
 
-    /// Gathers the seat's measured speaker paths with their impulse responses. Library records only: they carry the
-    /// timing tier; legacy room-correction positions have none, so they are never a source (design note 3).
+    /// Gathers the seat's measured speaker paths with their impulse responses. Library records and room-correction
+    /// positions both count; the timing tier each path carries decides whether it is trusted (design note 3). Older
+    /// room-correction positions carry none, so they read as untrusted (E29 S7, G12).
     private func locateSources(for seat: UUID, loadImpulseResponses: Bool) -> (sources: [RoomLocateSource], problem: String?) {
         func feedPosition(_ id: UUID) -> RoomPosition? { model.point(id)?.position }
         var newest: [UUID: RoomPath] = [:]
         for path in model.paths where path.receiver == seat && path.hasImpulseResponse {
-            guard case .measurementRecord = path.origin, RoomModelRule.state(of: path, in: context) == .measured else { continue }
+            guard RoomModelRule.state(of: path, in: context) == .measured else { continue }
+            switch path.origin {
+            case .measurementRecord, .roomCorrectionPosition: break
+            default: continue
+            }
             if let existing = newest[path.source], (existing.date ?? .distantPast) >= (path.date ?? .distantPast) { continue }
             newest[path.source] = path
         }
         guard !newest.isEmpty else {
-            return ([], "Locate needs library measurements of this seat from each speaker, made with loopback timing.")
+            return ([], "Locate needs measurements of this seat from each speaker, made with loopback timing.")
         }
         var sources: [RoomLocateSource] = []
         for (sourceID, path) in newest.sorted(by: { name(of: $0.key) < name(of: $1.key) }) {
-            guard let point = model.point(sourceID), case .measurementRecord(let recordID) = path.origin else { continue }
+            guard let point = model.point(sourceID) else { continue }
             if point.kind == .subLane {
                 sources.append(RoomLocateSource(
                     speakerName: point.name, speakerPosition: RoomPosition(x: 0, y: 0, z: 0, source: .unknown, uncertaintyMetres: nil),
@@ -407,7 +515,7 @@ final class RoomSeatMapController {
                 return ([], "Enter the position of \(feed.map { name(of: $0) } ?? point.name) first.")
             }
             // The availability check runs while drawing, so it does not read the files.
-            guard let ir = loadImpulseResponses ? impulseResponseLoader(recordID) : [Float](repeating: 0, count: 16), ir.count >= 16 else {
+            guard let ir = loadImpulseResponses ? impulseResponse(of: path) : [Float](repeating: 0, count: 16), ir.count >= 16 else {
                 return ([], "The impulse response of \(point.name) could not be read.")
             }
             sources.append(RoomLocateSource(

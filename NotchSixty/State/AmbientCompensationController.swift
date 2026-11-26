@@ -140,6 +140,8 @@ final class AmbientCompensationController: ObservableObject {
     /// the non-stationary hold for speech), and plans per-band cuts into `latestUnmasking`. Nothing is sent to
     /// the engine until S30c.
     var unmaskingInputsEnabled = false
+    /// E29 S7 (`e29.room-model`): the seat chosen on the seat map, for the music estimate. Nil keeps today's prediction.
+    var seatMusicFeed: SeatMusicFeed?
     private var speechHistory = SpeechEnvelopeHistory()
     /// The quiet-room spectrum captured with the quiet baseline. Held in memory only (the persisted baseline is
     /// a single level); until S30c persists it, the planner falls back when it is missing.
@@ -1141,7 +1143,8 @@ final class AmbientCompensationController: ObservableObject {
             envelopeSeconds: speechHistory.seconds,
             speechConfidence: confidence,
             appliedCutsDB: unmaskingAppliedCutsDB,
-            minimumSeparationConfidence: configuration.minimumSeparationConfidence
+            minimumSeparationConfidence: configuration.minimumSeparationConfidence,
+            seatMusic: seatMusicFeed?.prediction(modeledPlayback: detailed.modeledPlaybackSpectrum)
         )
         return confidence
     }
