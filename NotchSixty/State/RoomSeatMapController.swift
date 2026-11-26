@@ -68,7 +68,7 @@ struct RoomSeatMapPathRow: Identifiable, Equatable, Sendable {
 @MainActor
 @Observable
 final class RoomSeatMapController {
-    static let folderName = "room-model"
+    nonisolated static let folderName = "room-model"
     static let moveStepMetres = 0.1
 
     private(set) var model = RoomModel()
@@ -145,7 +145,8 @@ final class RoomSeatMapController {
         message = nil
         if let doc = try? RoomModelStore.load(from: directory(for: project.id)) {
             for p in doc.model.points { if let pos = p.position { entered[p.id] = pos } }
-            extraSeats = doc.model.points.filter { $0.kind == .seat }
+            // Seats with captured paths are measured (E29 S7 part 2); only the rest are the user's unmeasured seats.
+            extraSeats = doc.model.points.filter { $0.kind == .seat && doc.model.paths(to: $0.id).isEmpty }
         }
         rebuild()
     }
@@ -595,7 +596,13 @@ final class RoomSeatMapController {
             q.position = entered[p.id]
             return q
         }
-        let doc = RoomModelDocument(modelID: RoomModelID.stable("model", projectID.uuidString), model: RoomModel(points: pts))
+        // Keep what capture stored (E29 S7 part 2): measured paths and their IRs, and the points they join.
+        var doc = (try? RoomModelStore.load(from: directory(for: projectID)))
+            ?? RoomModelDocument(modelID: RoomModelCapture.modelID(for: projectID))
+        let referenced = Set(doc.model.paths.flatMap { [$0.source, $0.receiver] })
+        let enteredIDs = Set(pts.map(\.id))
+        let kept = doc.model.points.filter { referenced.contains($0.id) && !enteredIDs.contains($0.id) }
+        doc.model = RoomModel(points: pts + kept, paths: doc.model.paths)
         do {
             try RoomModelStore.save(doc, to: directory(for: projectID))
             message = nil

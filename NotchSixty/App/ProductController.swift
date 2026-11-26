@@ -216,7 +216,7 @@ final class ProductController: ObservableObject {
         if FeatureFlags().isEnabled(.roomModel) {
             RoomModelLiveWiring.attach(
                 projects: roomProjects, advisor: roomTreatmentAdvisor, ambient: ambientCompensation, profiles: profiles,
-                engine: audioEngine, quietZone: activeQuietZone, survey: feedForwardSurvey)
+                engine: audioEngine, quietZone: activeQuietZone, survey: feedForwardSurvey, mimo: mimoTreatment)
         }
         // E4 S28: the design survey's coherence turns the noise survey's reference predictions on.
         activeQuietZone.noiseSurvey?.attach(to: feedForwardSurvey)
@@ -363,7 +363,7 @@ final class ProductController: ObservableObject {
         if FeatureFlags().isEnabled(.roomModel) {
             RoomModelLiveWiring.attach(
                 projects: roomProjects, advisor: roomTreatmentAdvisor, ambient: ambientCompensation, profiles: profiles,
-                engine: audioEngine, quietZone: activeQuietZone, survey: feedForwardSurvey)
+                engine: audioEngine, quietZone: activeQuietZone, survey: feedForwardSurvey, mimo: mimoTreatment)
         }
         activeQuietZone.noiseSurvey?.attach(to: feedForwardSurvey)
         let feedForwardShadow = QuietZoneFeedForwardShadow()

@@ -1636,6 +1636,15 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    /// E29 S7 part 2: the selected system keeps only the ID of its room model (the model lives in `RoomModelStore`).
+    func setSelectedRoomModelID(_ id: UUID) {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }),
+              systemProfiles[index].roomModelID != id else { return }
+        systemProfiles[index].roomModelID = id
+        persist()
+    }
+
     func renameSelectedSystemProfile(to proposedName: String) {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }

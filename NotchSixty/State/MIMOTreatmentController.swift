@@ -346,9 +346,14 @@ final class MIMOTreatmentController: ObservableObject {
         refreshReadout()
     }
 
+    /// E29 S7: set under `e29.room-model`; throws `RoomModelAccessError` for an estimated or stale seat. Nil: no check.
+    var roomModelGate: (([UUID]) throws -> Void)?
+
     private func runDesign() async throws {
         guard let configuration = host.treatmentGraphConfiguration(), let rate = host.sampleRate else { throw InputError.audioNotRunning }
         let seats = seatsProvider().filter { $0.included && $0.weight > 0 }
+        // E29 S7 (`e29.room-model`): the plant is designed from measured seats only, never an estimate or a stale path.
+        try roomModelGate?(seats.map(\.id))
         if let routing = host.treatmentRouting(), routing.enabled {
             try await runRoutedDesign(routing: routing, configuration: configuration, rate: rate, seats: seats)
             return

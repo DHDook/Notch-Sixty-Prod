@@ -49,7 +49,8 @@ enum RoomModelLiveWiring {
     static func attach(
         projects: RoomCorrectionProjectController, advisor: RoomTreatmentAdvisorController,
         ambient: AmbientCompensationController, profiles: ProductProfileController, engine: AudioIOEngine,
-        quietZone: ActiveQuietZoneController, survey: QuietZoneFeedForwardSurveyController
+        quietZone: ActiveQuietZoneController, survey: QuietZoneFeedForwardSurveyController,
+        mimo: MIMOTreatmentController? = nil
     ) {
         func live() -> RoomModelLiveInputs {
             RoomModelLiveInputs(
@@ -67,6 +68,41 @@ enum RoomModelLiveWiring {
             return RoomCaptureStamp(
                 timingTier: nil, sessionID: nil, outputDeviceUID: inputs.outputDeviceUID,
                 arrangementRevision: inputs.arrangementRevision)
+        }
+        // The staleness rule's view of "now" for the designers (output gain is judged by the E26 stamp itself).
+        func context() -> RoomModelContext {
+            let inputs = live()
+            return RoomModelContext(
+                arrangementRevision: inputs.arrangementRevision, outputDeviceUID: inputs.outputDeviceUID)
+        }
+        // G5: every retained position is captured into the room model and the profile keeps the model ID.
+        projects.roomModelRecorder = { [weak projects, weak profiles] position, projectID, _ in
+            guard let projects, let profiles else { return }
+            let id = try RoomModelCapture.record(
+                position, projectID: projectID, store: projects.store, context: context())
+            profiles.setSelectedRoomModelID(id)
+        }
+        // G18: room-correction designs read their positions through the model (measured, current, never estimated).
+        projects.roomModelGate = { [weak projects] consumer, positions in
+            guard let projects else { return positions }
+            let model = RoomModelAdapter.build(RoomModelAdapterInput(positions: positions))
+            let derived = projects.project.map {
+                RoomModelCapture.derivedSeatIDs(
+                    store: projects.store, projectID: $0.id, measuredIDs: Set($0.measurements.map(\.id)))
+            } ?? []
+            return try RoomModelConsumerAccess.positions(
+                positions, model: model, context: context(), consumer: consumer, derivedPointIDs: derived)
+        }
+        // G18: the MIMO plant is designed from measured seats only.
+        mimo?.roomModelGate = { [weak projects] seatIDs in
+            guard let projects else { return }
+            let model = RoomModelAdapter.build(RoomModelAdapterInput(positions: projects.positions))
+            let derived = projects.project.map {
+                RoomModelCapture.derivedSeatIDs(
+                    store: projects.store, projectID: $0.id, measuredIDs: Set($0.measurements.map(\.id)))
+            } ?? []
+            try RoomModelConsumerAccess.seats(
+                seatIDs, model: model, context: context(), consumer: .mimoPlant, derivedPointIDs: derived)
         }
         advisor.roomModelLive = live
         ambient.seatMusicFeed = advisor.seatMusicFeed
