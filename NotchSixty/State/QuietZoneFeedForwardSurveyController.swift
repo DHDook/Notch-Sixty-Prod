@@ -119,6 +119,10 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
     private var multibusTransport: (any MultichannelCalibrationTransporting)?
     /// E26 S7c: the per-output leakage records of the last class A leakage measurement.
     @Published private(set) var leakageRecords: [CombinedAncPathRecord] = []
+    /// E29 S7 part 3 (G20, behind `e29.room-model`): the one gate the sub-path and Quiet Zone designs pass their
+    /// measured path records through. Returns the records untouched or throws the model's one message. Nil with the
+    /// flag off, so the design reads exactly what it read before.
+    var roomModelGate: (([CombinedAncPathRecord], RoomModelConsumer) throws -> [CombinedAncPathRecord])?
 
     init(
         quietZone: ActiveQuietZoneController,
@@ -529,6 +533,19 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
     }
 
     private func recomputeDesign() {
+        // G20: both designs (E26 sub path and E4 Quiet Zone plant) read the same measured records through the model.
+        if let gate = roomModelGate, !leakageRecords.isEmpty {
+            do {
+                _ = try gate(leakageRecords, .subPathDesign)
+                _ = try gate(leakageRecords, .quietZoneDesign)
+            } catch {
+                design = nil
+                assembled = nil
+                quietZone.setBassPlant(BassPlantMap(bands: []), fingerprint: nil)
+                message = error.localizedDescription
+                return
+            }
+        }
         switch QuietZoneFeedForwardSurveyRules.design(
             survey: survey, position: planningPosition(), budget: quietZone.feedForwardBudget,
             bassConditioning: quietZone.bassConditioningActive

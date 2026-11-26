@@ -88,6 +88,9 @@ final class QuietZoneHeadFollowController: ObservableObject {
     /// The smoothed head position (room frame, metres) for the readout; nil without a fresh pose.
     @Published private(set) var pose: QuietZoneHeadPose?
     @Published private(set) var positions: [SavedPosition] = []
+    /// E29 S7 part 3 (G20, behind `e29.room-model`): true when the surveyed tones may still be blended, false when the
+    /// model judges the room paths they were measured with stale (the one message). Nil with the flag off.
+    var roomModelGate: (() -> Bool)?
     @Published private(set) var message = "Head follow is off. The camera is not in use."
 
     enum Suspension: Hashable { case sleep, background }
@@ -334,7 +337,7 @@ final class QuietZoneHeadFollowController: ObservableObject {
     /// The surveyed tone for the head's current position, blended from the nearest saved positions, or nil to keep the
     /// fixed ear survey (camera off, no pose or a stale one, head outside the trust radius, or no saved position).
     func tone(near frequencyHz: Double) -> QuietZoneEarTone? {
-        guard isCameraOn, let head = tracker.pose(at: clock()),
+        guard isCameraOn, roomModelGate?() ?? true, let head = tracker.pose(at: clock()),
               let blend = QuietZoneHeadSurvey.weights(positions: positions.map { ($0.x, $0.y, $0.z) }, at: head),
               let first = blend.first,
               let toneIndex = positions[first.index].tones.indices.min(by: {

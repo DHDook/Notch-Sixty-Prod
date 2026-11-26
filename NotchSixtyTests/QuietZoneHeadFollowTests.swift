@@ -113,6 +113,16 @@ extension QuietZoneVirtualMicWiringTests {
             guard case .following(let nearA, _) = follow.readout else { return XCTFail("readout \(follow.readout)") }
             XCTAssertEqual(nearA, "Seat 1")
 
+            // G20: while the room model calls the surveyed paths stale, the blend is off and the fixed ear survey stays.
+            let blendedAtA = try XCTUnwrap(rig.survey.earTone(near: f)?.ratio)
+            let fixedB = try XCTUnwrap(rig.survey.tones.first?.ratio)
+            XCTAssertNotEqual(blendedAtA, fixedB, "rate \(rate)")
+            follow.roomModelGate = { false }
+            XCTAssertEqual(rig.survey.earTone(near: f)?.ratio, fixedB, "gated, rate \(rate)")
+            follow.roomModelGate = { true }
+            XCTAssertEqual(rig.survey.earTone(near: f)?.ratio, blendedAtA, "gate open, rate \(rate)")
+            follow.roomModelGate = nil
+
             await deliver(head, follow, at: 0.3)
             let atB = try designReductionDB(rig, twin: twinB, f: f)
             XCTAssertGreaterThan(atB.db, 3, "rate \(rate)")
