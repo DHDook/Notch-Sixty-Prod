@@ -460,26 +460,19 @@ extension AudioIOEngine {
         }
         var installedLanes: (plan: RoomCorrectionLanePlan, delays: [Int: UInt32])?
         var inactive: RoomCorrectionInactiveReason?
-        // E24 S9: a blind-ABX override replaces the profile's lanes while its sheet is open. It never changes the
-        // stored configuration, and a layout or delay it cannot honour throws instead of silently falling back.
-        let abx = roomCorrectionABXOverride
-        var abxGain: Float = 1
-        if let abx {
-            guard abx.install.matches(programLaneCount: shape.laneCount, subwooferCount: subwooferCount) else {
+        // E24 S9, E12 S28b1: an audition override replaces the profile's room correction while a blind comparison is
+        // open. It never changes the stored configuration, and a layout or delay it cannot honour throws instead of
+        // silently falling back.
+        let audition = auditionOverride
+        let roomWanted = audition?.roomCorrection ?? .applied
+        if case .lanes(let install) = roomWanted {
+            guard install.matches(programLaneCount: shape.laneCount, subwooferCount: subwooferCount) else {
                 throw RoomCorrectionLaneInstallError.invalidLayout
             }
-            var delays = try abx.install.delayFrames(sampleRate: sampleRate)
-            if abx.extraDelayFrames > 0 {
-                for lane in 0..<(shape.laneCount + (subwooferCount ?? 0)) {
-                    let total = delays[lane, default: 0] + abx.extraDelayFrames
-                    guard total <= N60_GRAPH_MAX_DELAY_FRAMES else {
-                        throw RoomCorrectionLaneInstallError.delayTooLong(lane: lane)
-                    }
-                    delays[lane] = total
-                }
-            }
-            installedLanes = (try roomCorrectionRateCache.plan(for: abx.install.design, sampleRate: sampleRate), delays)
-            abxGain = abx.gain
+            installedLanes = (try roomCorrectionRateCache.plan(for: install.design, sampleRate: sampleRate),
+                              try install.delayFrames(sampleRate: sampleRate))
+        } else if roomWanted == .off {
+            // "Everything off": no room correction of any kind, so no FIR and no declared latency.
         } else if inputs.room.enabled, let lanes = inputs.room.lanes {
             // Lane plans install on the main lanes (design note 8). A layout that no longer matches, or a rate the
             // filters cannot be built for, leaves correction off with its reason; playback is never refused (Q9, Q11).
@@ -558,12 +551,22 @@ extension AudioIOEngine {
         var program = UnifiedGraphProgramDSP(
             stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers, groupEQ: try inputs.stereoEQ.groupCurves(shape: shape, sampleRate: sampleRate))
         program.deltaAudition = deltaAudition
+        // The latency match: every source lane (mains and, with a lane plan, subwoofers) arrives `pad` frames later, before
+        // bass management. Without a lane plan the subs are derived from the delayed mains.
+        var padDelays = installedLanes?.delays ?? [:]
+        if let pad = audition?.latencyPadFrames, pad > 0 {
+            for lane in 0..<(shape.laneCount + (installedLanes == nil ? 0 : (subwooferCount ?? 0))) {
+                let total = padDelays[lane, default: 0] + pad
+                guard total <= N60_GRAPH_MAX_DELAY_FRAMES else { throw RoomCorrectionLaneInstallError.delayTooLong(lane: lane) }
+                padDelays[lane] = total
+            }
+        }
+        program.inputGain *= audition?.programGain ?? 1
         if let installedLanes {
-            program.inputGain *= abxGain
             program.roomLanes = installedLanes.plan
-            program.laneDelayFrames = installedLanes.delays
             program.subLaneCount = subwooferCount ?? 0
         }
+        if installedLanes != nil || !padDelays.isEmpty { program.laneDelayFrames = padDelays }
         self.programs.setRoomCorrectionInactiveReason(inactive)
         return program.isNeutral && program.foldedBass == nil ? nil : program
     }

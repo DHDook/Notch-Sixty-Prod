@@ -61,7 +61,7 @@ final class N60CoreABITests: XCTestCase {
             "n60_measure_waterfall_defaults", "n60_monitor_ring_create", "n60_spl_create", "n60_rta_default_fft_size",
             "n60_measure_predict_treated_length", "n60_mimo_abi_version", "n60_correct_abi_version",
             "n60_correct_design_defaults", "n60_correct_synth_defaults", "n60_correct_bass_channel_defaults",
-            "n60_correct_multisub_search", "n60_eq_linear_phase_design", "n60_xover_abi_version", "n60_headroom_abi_version", "n60_core_abi",
+            "n60_correct_multisub_search", "n60_eq_linear_phase_design", "n60_xover_abi_version", "n60_headroom_abi_version", "n60_headroom_weighted_level", "n60_core_abi",
             "n60_anc_abi_version", "n60_roommodel_interpolate", "N60AncGuardCreate", "N60FeedForwardLiveCreate", "N60FeedForwardShadowCreate",
             "N60FeedForwardSurveyCreate", "N60AncLaneFeedCreate", "N60AncDecimatorCreate", "N60RemoteTonalCreate",
         ]

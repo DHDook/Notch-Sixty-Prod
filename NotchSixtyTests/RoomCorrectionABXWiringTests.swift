@@ -7,10 +7,10 @@ final class FakeABXPlayer: RoomCorrectionABXPlaying {
     var unavailableReason: String?
     var isSwitching = false
     var failNextPlay = false
-    private(set) var played: [RoomCorrectionABXOverride] = []
+    private(set) var played: [AuditionOverride] = []
     private(set) var restoreCount = 0
 
-    func play(_ override: RoomCorrectionABXOverride) throws {
+    func play(_ override: AuditionOverride) throws {
         if failNextPlay { failNextPlay = false; throw RoomCorrectionABXError.unavailable("switch failed") }
         played.append(override)
     }
@@ -113,7 +113,7 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
                 sampleRate: rate, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs))
             let baseGain = base.inputGain
 
-            engine.roomCorrectionABXOverride = RoomCorrectionABXOverride(install: candidate, gain: 0.5, extraDelayFrames: 40)
+            engine.auditionOverride = .lanes(candidate, gain: 0.5, latencyPadFrames: 40)
             let over = try XCTUnwrap(engine.makeUnifiedProgramDSP(
                 sampleRate: rate, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs), "\(rate)")
             let candidateDelays = try candidate.delayFrames(sampleRate: rate)
@@ -133,7 +133,7 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
             XCTAssertEqual(baseDelays[2, default: 0], candidateDelays[2, default: 0], "\(rate)")
 
             // Clearing restores the profile plan exactly.
-            engine.roomCorrectionABXOverride = nil
+            engine.auditionOverride = nil
             let restored = try XCTUnwrap(engine.makeUnifiedProgramDSP(
                 sampleRate: rate, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs))
             XCTAssertEqual(restored.roomLanes, base.roomLanes, "\(rate)")
@@ -148,11 +148,11 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
         var inputs = engine.currentLiveGraphInputs
         inputs.room = RoomCorrectionConfiguration(enabled: true, lanes: profile)
         let candidate = try install(mode: .video, db: -3, name: "Candidate")
-        engine.roomCorrectionABXOverride = RoomCorrectionABXOverride(install: candidate, gain: 1, extraDelayFrames: 10_000_000)
+        engine.auditionOverride = .lanes(candidate, gain: 1, latencyPadFrames: 10_000_000)
         XCTAssertThrowsError(try engine.makeUnifiedProgramDSP(
             sampleRate: 48_000, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs))
         let wrongLayout = try install(mode: .video, db: -3, name: "Wrong", subs: 2)
-        engine.roomCorrectionABXOverride = RoomCorrectionABXOverride(install: wrongLayout, gain: 1, extraDelayFrames: 0)
+        engine.auditionOverride = .lanes(wrongLayout, gain: 1, latencyPadFrames: 0)
         XCTAssertThrowsError(try engine.makeUnifiedProgramDSP(
             sampleRate: 48_000, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs))
     }
@@ -161,10 +161,10 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
         let engine = try engine()
         XCTAssertNotNil(engine.roomCorrectionABXUnavailableReason)
         let candidate = try install(mode: .video, db: -3, name: "Candidate")
-        XCTAssertThrowsError(try engine.setRoomCorrectionABXOverride(
-            RoomCorrectionABXOverride(install: candidate, gain: 1, extraDelayFrames: 0)))
-        XCTAssertNil(engine.roomCorrectionABXOverride)
-        XCTAssertNoThrow(try engine.setRoomCorrectionABXOverride(nil))
+        XCTAssertThrowsError(try engine.setAuditionOverride(
+            .lanes(candidate, gain: 1, latencyPadFrames: 0)))
+        XCTAssertNil(engine.auditionOverride)
+        XCTAssertNoThrow(try engine.setAuditionOverride(nil))
     }
 
     // MARK: Controller
@@ -172,7 +172,7 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
     private struct Run {
         let controller: RoomCorrectionABXController
         let player: FakeABXPlayer
-        let overrideB: RoomCorrectionABXOverride
+        let overrideB: AuditionOverride
         let directory: URL
     }
 

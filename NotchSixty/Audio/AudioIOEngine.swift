@@ -702,7 +702,7 @@ final class AudioIOEngine {
     func renderBassManagementConfiguration(
         _ source: BassManagementConfiguration? = nil
     ) -> BassManagementConfiguration {
-        var render = source ?? bassManagementConfiguration
+        var render = auditionedBassManagement(source ?? bassManagementConfiguration)
         if physicalSpeakerBusRoutingActive {
             // The physical splitter runs after shared DSP/audition. Disabling the
             // older early recombined crossover prevents double filtering.
@@ -1168,50 +1168,9 @@ final class AudioIOEngine {
     /// a session restart, stop or output change clears it.
     var liveGenerator: LiveGenerator?  // set by the E19 S12c probe feed extension
 
-    /// E24 S9: the design the blind ABX is playing in place of the profile's applied lanes, level-trimmed and
-    /// latency-matched. Never persisted; Stop, an output change and a session teardown clear it.
-    var roomCorrectionABXOverride: RoomCorrectionABXOverride?
-
-    /// Why the ABX cannot play right now, or nil when it can: it needs a running graph session that installs lanes.
-    var roomCorrectionABXUnavailableReason: String? {
-        if nChannelTransportSession == nil, transportSession != nil {
-            return RoomCorrectionInactiveReason.needsSpeakerProfile.message
-        }
-        guard nChannelTransportSession != nil, liveGraphEditsAvailable else {
-            return "Start playback with music to compare by ear."
-        }
-        guard roomCorrectionConfiguration.enabled, roomCorrectionConfiguration.lanes != nil else {
-            return "Apply a room correction to the speaker profile first."
-        }
-        return nil
-    }
-
-    /// True while the core is warming or fading to a republished graph (the switch the ABX presses cause).
-    var graphRebuildInProgress: Bool { (nChannelTransportSession?.unifiedGraphReadback?.rebuildState ?? 0) != 0 }
-
-    /// Sets (or, with nil, clears) the ABX override and moves the running graph to it through the normal faded
-    /// republish. Throws and leaves the override and the running graph as they were when the graph cannot take it.
-    func setRoomCorrectionABXOverride(_ override: RoomCorrectionABXOverride?) throws {
-        if override == nil, roomCorrectionABXOverride == nil { return }
-        if override == nil, nChannelTransportSession == nil {
-            roomCorrectionABXOverride = nil
-            return
-        }
-        if override == nil {
-            // Clearing never fails to clear: if the republish cannot run, the next republish or teardown rebuilds
-            // the graph without the override.
-            roomCorrectionABXOverride = nil
-            try republishLiveGraph(currentLiveGraphInputs)
-            return
-        }
-        if let reason = roomCorrectionABXUnavailableReason { throw RoomCorrectionABXError.unavailable(reason) }
-        let previous = roomCorrectionABXOverride
-        roomCorrectionABXOverride = override
-        do { try republishLiveGraph(currentLiveGraphInputs) } catch {
-            roomCorrectionABXOverride = previous
-            throw error
-        }
-    }
+    /// E24 S9, E12 S28b1: what the blind comparison plays instead of the stored system settings. Never persisted; Stop,
+    /// an output change and a session teardown clear it. Setter and refusals: `AudioIOEngine+AuditionOverride.swift`.
+    var auditionOverride: AuditionOverride?
 
     /// Plays (or, with nil, stops) the E11 generator on the running graph through the normal republish path:
     /// N-channel graphs through `republishLiveGraph`, the stereo graph through its transport session. Throws and

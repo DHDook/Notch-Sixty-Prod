@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define N60_HEADROOM_ABI_VERSION 3 /* 3 (E19 S5): MIMO term and budget; 2 (E9 S7b): N60_HEADROOM_STAGE_LINKWITZ */
+#define N60_HEADROOM_ABI_VERSION 4 /* 4 (E12 S28b1): n60_headroom_weighted_level; 3 (E19 S5): MIMO term and budget; 2 (E9 S7b): N60_HEADROOM_STAGE_LINKWITZ */
 
 #define N60_HEADROOM_OK 0
 #define N60_HEADROOM_ERR_ARGUMENT (-1) /* null pointer, bad struct size, bad rate or count */
@@ -100,6 +100,25 @@ uint32_t n60_headroom_abi_version(void);
 
 /* Evaluates one output. Control or worker thread only. */
 int n60_headroom_evaluate(const n60_headroom_output *output, n60_headroom_result *result);
+
+/*
+ * Weighted level (E12 S28b1, blind-listening level match). The same composite response as n60_headroom_evaluate (same
+ * paths, tail, grid and combine rules), reduced to one number: the K-weighted (ITU-R BS.1770-4) power of pink noise
+ * passed through the output, relative to the same noise through a flat unity chain, so a flat chain reads 0 dB at
+ * every rate. Pink noise has equal power per octave, so every point of the log-spaced grid has the same weight.
+ * `power_ratio` is the linear form, for summing several outputs of one side (electrical model: no room, no ear).
+ * `ceiling_db` is ignored. Control or worker thread only; deterministic.
+ */
+#define N60_HEADROOM_LEVEL_MAX_HZ 20000.0 /* the level grid stops here (or at 0.45 fs), so the same chain reads alike at every rate */
+
+typedef struct n60_headroom_level_result {
+    uint32_t struct_size;  /* sizeof(n60_headroom_level_result); set by the caller */
+    double level_db;       /* 10 log10(power_ratio) */
+    double power_ratio;    /* weighted power of the output / weighted power of a flat unity chain */
+    uint32_t grid_points;
+} n60_headroom_level_result;
+
+int n60_headroom_weighted_level(const n60_headroom_output *output, n60_headroom_level_result *result);
 
 /*
  * MIMO term (E19 S5, design note 6). The MIMO stage (graph kind N60_STAGE_MIMO, `n60/graph.h`) sends program
