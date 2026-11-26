@@ -68,7 +68,7 @@ struct RoomSeatMapPathRow: Identifiable, Equatable, Sendable {
 @MainActor
 @Observable
 final class RoomSeatMapController {
-    static let folderName = "room-model"
+    nonisolated static let folderName = "room-model"
     static let moveStepMetres = 0.1
 
     private(set) var model = RoomModel()
