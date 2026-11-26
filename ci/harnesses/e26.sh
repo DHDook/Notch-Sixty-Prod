@@ -1,9 +1,6 @@
 # Sourced by ci/run_harnesses.sh (shares its helpers: harness, selected, run_timed, build_core_objs, CORE_OBJS, STRICT, RT, OUT, passed, failed).
 # Behavioural harnesses owned by epic E26.
 
-# E26 S1: tonal anti-noise bypasses the stereo crossover on the legacy kernel (class C is not a sub for Quiet Zone).
-# shellcheck disable=SC2086
-harness e26_anc_bypass "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e26_anc_bypass.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
 # E26 S1: the twin's downstream-sub and app-splitter bass-path models.
 if selected e26_bass_path; then
     echo "::group::e26_bass_path"

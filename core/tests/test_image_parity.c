@@ -1,18 +1,25 @@
-/* E6 S12b: the core IMAGE (stereo mode, widener) and DEESS (de-harsh, de-esser) stages against the shipping kernel core
- * frame (N60Dynamics.c) on the same stereo signal at the eight standard rates, for six configurations including a live
- * mid-stream parameter change. Apple-only (kernel sources use nullability qualifiers). Target: -120 dBFS peak,
- * -130 dBFS RMS (-85 / -95 with the widener on, see below), and the de-esser gain-reduction readback within 0.01 dB of the kernel telemetry. */
+/* E6 S12b, E23 T2: the core IMAGE (stereo mode, widener) and DEESS (de-harsh, de-esser) stages at the eight standard
+ * rates, for six configurations plus a live mid-stream parameter change, against a frozen corpus
+ * (e23_corpus_image.inc, see e23_corpus.h; each case: the de-esser gain-reduction readback, then the left and right
+ * summaries). A -DN60_E23_WRITE_CORPUS build also runs the original kernel comparison (N60Dynamics.c core frame;
+ * Apple-only) with its bounds (see the comments at the checks) and writes the corpus from the graph output. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "n60/graph.h"
+#include "e23_corpus.h"
+#ifdef N60_E23_WRITE_CORPUS
 #include "../../NotchSixty/Audio/Realtime/N60Dynamics.h"
+#else
+#include "e23_corpus_image.inc"
+#endif
 
 #define N 400384
 #define SWITCH_AT 200192
 static float inL[N], inR[N], kL[N], kR[N], cL[N], cR[N];
+#define STRIDE (1 + 2 * E23_CH_VALUES)
 
 typedef struct {
     int mode, wide, monoLow;
@@ -24,6 +31,7 @@ typedef struct {
     int dyn;
 } Cfg;
 
+#ifdef N60_E23_WRITE_CORPUS
 static bool apply(N60DynamicsSnapshot *s, double rate, const Cfg *c) {
     bool ok = N60DynamicsSnapshotSetStereoMode(s, (N60StereoMode)c->mode);
     ok = ok && N60DynamicsSnapshotSetStereoWidener(s, rate, c->wide, c->monoLow, c->lowMid, c->midHigh, c->lowW, c->midW, c->highW);
@@ -31,6 +39,8 @@ static bool apply(N60DynamicsSnapshot *s, double rate, const Cfg *c) {
     ok = ok && N60DynamicsSnapshotSetDeEsserAdvanced(s, rate, c->ess, c->essHz, c->thr, c->ratio, c->range, c->q, c->atk, c->rel, c->dyn);
     return ok;
 }
+
+#endif
 
 static void img(const Cfg *c, float *p) {
     p[0] = (float)c->mode; p[1] = (float)c->wide; p[2] = (float)c->monoLow; p[3] = c->lowMid; p[4] = c->midHigh;
@@ -92,6 +102,11 @@ int main(void) {
         {1, 1, 0, 150, 5000, 0.8f, 1.4f, 1.7f, 1, 5000, -3.0f, 1, 7500, -30, 8, -12, 1.5f, 0.5f, 30, 0},  /* everything, wideband */
     };
     int failures = 0;
+#ifdef N60_E23_WRITE_CORPUS
+    e23_open("kCorpus");
+#else
+    (void)kL; (void)kR;
+#endif
     for (unsigned r = 0; r < 8; r++) {
         const double rate = rates[r];
         for (unsigned m = 0; m < 7; m++) {
@@ -106,6 +121,7 @@ int main(void) {
                 inL[i] = 0.3f * (float)sin(2.0 * M_PI * 440.0 * i / rate) + burst * 0.25f * (float)sin(2.0 * M_PI * 6800.0 * i / rate) + noise;
                 inR[i] = 0.2f * (float)sin(2.0 * M_PI * 440.0 * i / rate + 1.0) + burst * 0.2f * (float)sin(2.0 * M_PI * 7000.0 * i / rate) - noise;
             }
+#ifdef N60_E23_WRITE_CORPUS
             N60DynamicsSnapshot s1 = N60DynamicsSnapshotMakeBypassed(rate), s2 = N60DynamicsSnapshotMakeBypassed(rate);
             if (!apply(&s1, rate, c) || !apply(&s2, rate, c2)) { fprintf(stderr, "kernel setup failed %.0f %u\n", rate, m); return 1; }
             N60DynamicsRuntime *rt = calloc(1, sizeof(N60DynamicsRuntime));
@@ -116,6 +132,7 @@ int main(void) {
             const N60DynamicsTelemetry tel = N60DynamicsRuntimeTelemetry(rt);
             free(rt);
 
+#endif
             n60_stage_desc st[2];
             float pi[8], pd[12];
             n60_graph *g = build(rate, c, st, pi, pd);
@@ -126,27 +143,33 @@ int main(void) {
                 float *op[2] = {cL + off2, cR + off2};
                 n60_graph_process(g, ip, op, 512 > N - off2 ? (uint32_t)(N - off2) : 512u);
             }
-            double peak = 0, ss = 0, moved = 0;
-            for (int i = 0; i < N; i++) {
-                double e = fabs((double)cL[i] - kL[i]);
-                if (e > peak) peak = e;
-                ss += e * e;
-                e = fabs((double)cR[i] - kR[i]);
-                if (e > peak) peak = e;
-                ss += e * e;
-                e = fabs((double)cL[i] - inL[i]);
-                if (e > moved) moved = e;
-            }
-            const double rms = sqrt(ss / (2.0 * N));
+            double moved = 0;
+            for (int i = 0; i < N; i++) { const double e = fabs((double)cL[i] - inL[i]); if (e > moved) moved = e; }
+            if (!(moved > 1e-3)) { fprintf(stderr, "FAIL stage did not change the signal\n"); failures++; }
             n60_dynamics_readback rb;
             memset(&rb, 0, sizeof rb);
             rb.structSize = sizeof rb;
-            double grDiff = 0;
             if (n60_graph_read_dynamics(g, 2, 0, &rb) != N60_STATUS_OK) { fprintf(stderr, "read_dynamics failed\n"); failures++; }
-            else grDiff = fabs((double)rb.grNowDb - tel.deEsserGainReductionDB);
-            printf("rate %.0f cfg %u: peak %.1f dBFS rms %.1f dBFS gr %.3f (kernel %.3f)\n", rate, m,
-                   20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), rb.grNowDb, tel.deEsserGainReductionDB);
-            if (!(moved > 1e-3)) { fprintf(stderr, "FAIL stage did not change the signal\n"); failures++; }
+            const int latency = (int)n60_graph_latency_frames(g);
+            double rec[STRIDE];
+            rec[0] = rb.grNowDb;
+            e23_summarise(cL, N, latency, rec + 1);
+            e23_summarise(cR, N, latency, rec + 1 + E23_CH_VALUES);
+#ifdef N60_E23_WRITE_CORPUS
+            {
+                double peak = 0, ss = 0;
+                for (int i = 0; i < N; i++) {
+                    double e = fabs((double)cL[i] - kL[i]);
+                    if (e > peak) peak = e;
+                    ss += e * e;
+                    e = fabs((double)cR[i] - kR[i]);
+                    if (e > peak) peak = e;
+                    ss += e * e;
+                }
+                const double rms = sqrt(ss / (2.0 * N));
+                const double grDiff = fabs((double)rb.grNowDb - tel.deEsserGainReductionDB);
+                printf("rate %.0f cfg %u: peak %.1f dBFS rms %.1f dBFS gr %.3f (kernel %.3f)\n", rate, m,
+                       20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), rb.grNowDb, tel.deEsserGainReductionDB);
             /* E6 S12h (G36): the core widener's crossover biquads are double; the kernel's are float and drift from the
              * exact response at the low corners (measured -35 dB relative error at 352.8 kHz, 80 Hz). With the widener on
              * the difference to the kernel is the kernel's own float error, so the bound is looser (peak -85, rms -95). */
@@ -162,11 +185,27 @@ int main(void) {
             if (!(20 * log10(peak + 1e-30) < peakBound)) { fprintf(stderr, "FAIL peak rate %.0f m %u: %.1f dBFS (bound %.0f)\n", rate, m, 20 * log10(peak + 1e-30), peakBound); failures++; }
             if (!(20 * log10(rms + 1e-30) < rmsBound)) { fprintf(stderr, "FAIL rms rate %.0f m %u: %.1f dBFS (bound %.0f)\n", rate, m, 20 * log10(rms + 1e-30), rmsBound); failures++; }
             if (!(grDiff < 0.01)) { fprintf(stderr, "FAIL gain reduction\n"); failures++; }
+            }
+            e23_put(rec, STRIDE);
+#else
+            {
+                const double *frozen = kCorpus + (size_t)(r * 7 + m) * STRIDE;
+                char label[64];
+                snprintf(label, sizeof label, "rate %.0f cfg %u L", rate, m);
+                failures += e23_compare(rec + 1, frozen + 1, label);
+                snprintf(label, sizeof label, "rate %.0f cfg %u R", rate, m);
+                failures += e23_compare(rec + 1 + E23_CH_VALUES, frozen + 1 + E23_CH_VALUES, label);
+                if (!(fabs(rec[0] - frozen[0]) < 0.01)) { fprintf(stderr, "FAIL gain reduction %.4f vs frozen %.4f at %.0f cfg %u\n", rec[0], frozen[0], rate, m); failures++; }
+            }
+#endif
             n60_graph_retire(g);
         }
     }
     (void)off;
+#ifdef N60_E23_WRITE_CORPUS
+    e23_close();
+#endif
     if (failures) return 1;
-    puts("n60core parity: IMAGE and DEESS match the kernel core frame");
+    puts("n60core parity: IMAGE and DEESS match the frozen corpus");
     return 0;
 }

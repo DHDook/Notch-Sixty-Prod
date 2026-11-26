@@ -1,8 +1,8 @@
 /* E6 S8b2b: behavioural harness for the N-channel live bridge graph path. At the eight standard
- * rates, drives a stereo N-channel bridge through the Capture/Output IOProcs with and without an
+ * rates, drives a stereo N-channel bridge through the Capture/Output IOProcs with an
  * attached libn60core graph (gain 0.5): the graph must carry the render (half level), a block
  * larger than the graph's maxBlockFrames must produce silence and a render failure rather than
- * overrun, the graph latency must be reported, and detaching must restore the legacy render. */
+ * overrun, and the graph latency must be reported (E23 T2: graph-only; the legacy render is no longer asserted). */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,10 +102,6 @@ int main(void) {
         CHECK(b->unifiedGraph == NULL, "failed attach left a graph");
 
         uint32_t pos = 0;
-        float legacy = 0.0f;
-        for (int i = 0; i < 8; ++i) legacy = peakOfBlock(b, MAXB, &pos, rate);
-        CHECK(legacy > 0.35f && legacy < 0.45f, "legacy level %.3f at %.0f", legacy, rate);
-
         CHECK(N60LiveNChannelBridgeAttachGraph(b, graph, 2u, MAXB), "attach");
         float viaGraph = 0.0f;
         for (int i = 0; i < 8; ++i) viaGraph = peakOfBlock(b, MAXB, &pos, rate);
@@ -123,11 +119,8 @@ int main(void) {
         s = N60LiveNChannelBridgeGetSnapshot(b);
         CHECK(s.renderFailures > 0, "oversized block not counted");
 
-        /* Detach restores the legacy render. */
+        /* E23 T2: detaching is accepted; what an un-graphed bridge renders is no longer asserted (the old render core goes in K3). */
         CHECK(N60LiveNChannelBridgeAttachGraph(b, NULL, 0u, 0u), "detach");
-        float after = 0.0f;
-        for (int i = 0; i < 8; ++i) after = peakOfBlock(b, MAXB, &pos, rate);
-        CHECK(after > 0.35f && after < 0.45f, "legacy level after detach %.3f", after);
 
         N60LiveNChannelBridgeDestroy(b);
         n60_graph_retire(graph);

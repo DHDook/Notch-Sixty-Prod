@@ -336,6 +336,42 @@ static void testDynEq(double rate) {
     }
 }
 
+/* E23 T2 (replaces the kernel harness pr34_dynamic_domains): the dynamic EQ runs in the mid/side domain by sitting between
+ * the M/S encode and decode. A cut band on the mid lane only (lane mask 0x1) leaves a pure-side signal untouched and
+ * cuts a pure-mid signal. Dual-mono isolation is the unlinked-lane case in testDynEq. */
+static void testDynEqMidSide(double rate) {
+    enum { CH = 2 };
+    float p[16] = {0};
+    fillBand(p + 1, 0, -30, 4);
+    n60_stage_desc st[3];
+    st[0] = stage(N60_STAGE_MS_ENCODE, 1, 0, NULL, 0);
+    st[0].laneB = 1;
+    st[1] = stageMask(N60_STAGE_DYN_EQ, 2, 0x1, p, 16);
+    st[2] = stage(N60_STAGE_MS_DECODE, 3, 0, NULL, 0);
+    st[2].laneB = 1;
+    uint32_t total = (uint32_t)(0.8 * rate);
+    for (int pureSide = 0; pureSide < 2; pureSide++) {
+        n60_graph *g = buildOrDie(rate, 512, CH, st, 3);
+        float **in = alloc2d(CH, total), **out = alloc2d(CH, total);
+        for (uint32_t i = 0; i < total; i++) {
+            float x = 0.5f * (float)sin(2 * M_PI * 1000.0 * i / rate);
+            in[0][i] = x;
+            in[1][i] = pureSide ? -x : x;
+        }
+        render(g, in, out, CH, total, 512);
+        uint32_t t = (uint32_t)(0.1 * rate);
+        double a0 = tailAbsMax(out[0], total, t) / 0.5, a1 = tailAbsMax(out[1], total, t) / 0.5;
+        if (pureSide) {
+            CHECK(fabs(db(a0)) < 0.1 && fabs(db(a1)) < 0.1, "rate %.0f pure side untouched by the mid-lane cut (%.3f %.3f dB)", rate, db(a0), db(a1));
+        } else {
+            CHECK(db(a0) < -5.0 && db(a1) < -5.0, "rate %.0f pure mid cut (%.3f %.3f dB)", rate, db(a0), db(a1));
+        }
+        n60_graph_retire(g);
+        free2d(in, CH);
+        free2d(out, CH);
+    }
+}
+
 /* ---- program FIR ----------------------------------------------------------- */
 
 static void testFir(double rate, uint32_t taps, uint32_t total, uint32_t block, uint32_t declared) {
@@ -624,6 +660,7 @@ int main(void) {
         testCompressorLive(rate);
         testExpander(rate);
         testDynEq(rate);
+        testDynEqMidSide(rate);
         testFir(rate, 1, 3000, 97, 0);
         testFir(rate, 255, 3000, 512, 0);
         testFir(rate, 256, 3000, 1, 3);

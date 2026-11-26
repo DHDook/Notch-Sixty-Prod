@@ -400,6 +400,35 @@ static void testArguments(void) {
     n60_graph_retire(g);
 }
 
+/* E23 T2 (replaces the kernel harness pr35_meter_gating): metering is a stage. A graph built without the meter stages
+ * publishes no meter readback (the reads are refused, so a meter that was never asked for cannot show a stale value), and
+ * a graph with them publishes the input and output levels of the same signal. */
+static float dcQuarter(uint32_t lane, uint64_t i, double rate, const double *arg) {
+    (void)i; (void)rate; (void)arg;
+    return lane == 0 ? 0.25f : -0.125f;
+}
+static void testMeterGating(double rate) {
+    float peak = 0.0f, rms = 0.0f;
+    n60_graph *off = build(rate, 2, NULL, 0);
+    run(off, 2, 0, 4096, dcQuarter, rate, NULL);
+    CHECK(n60_graph_read_meter(off, 2, 0, &peak, &rms) != N60_STATUS_OK, "%.0f meter read with metering off is refused", rate);
+    CHECK(n60_graph_read_meter(off, 7, 0, &peak, &rms) != N60_STATUS_OK, "%.0f output meter read with metering off is refused", rate);
+    n60_graph_retire(off);
+
+    n60_stage_desc st[2] = {stage(N60_STAGE_METER_IN, 2, N60_LANE_ALL, 0, NULL, 0), stage(N60_STAGE_METER_OUT, 7, N60_LANE_ALL, 0, NULL, 0)};
+    n60_graph *on = build(rate, 2, st, 2);
+    run(on, 2, 0, 4096, dcQuarter, rate, NULL);
+    for (uint32_t id = 2; id <= 7; id += 5) {
+        for (uint32_t lane = 0; lane < 2; lane++) {
+            peak = rms = 0.0f;
+            CHECK(n60_graph_read_meter(on, id, lane, &peak, &rms) == N60_STATUS_OK, "%.0f meter %u lane %u read", rate, id, lane);
+            const float want = lane == 0 ? 0.25f : 0.125f;
+            CHECK(fabsf(peak - want) < 1e-5f && fabsf(rms - want) < 1e-4f, "%.0f meter %u lane %u: peak %.5f rms %.5f", rate, id, lane, peak, rms);
+        }
+    }
+    n60_graph_retire(on);
+}
+
 int main(void) {
     for (unsigned i = 0; i < sizeof kRates / sizeof kRates[0]; i++) {
         testCompressor(kRates[i]);
@@ -407,6 +436,7 @@ int main(void) {
         testProtection(kRates[i]);
         testOverRange(kRates[i]);
         testLimiterBypassedDuringPlayback(kRates[i]);
+        testMeterGating(kRates[i]);
     }
     testArguments();
     if (failures) {

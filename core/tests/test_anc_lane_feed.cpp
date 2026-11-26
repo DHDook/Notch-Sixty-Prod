@@ -526,6 +526,69 @@ int main() {
         N60AncLaneFeedDestroy(r.feed);
     }
 
+    // 10. E23 T2 (ported from the retired kernel harness e4_ff_live_wiring): the live feed-forward gate, reference loss
+    //     and the reference ring contract, on the lane feed that ships.
+    for (double rate : kRates) {
+        const uint64_t leaseLongFrames = static_cast<uint64_t>(rate * 600.0);
+        const uint64_t fadeFrames = static_cast<uint64_t>(rate * 0.050);  // the 50 ms arm ramp also fades the trip out
+        Rig r;
+        CHECK(rigInit(r, rate, false, true, 0.05), "ff gate rig at %.0f", rate);
+        float w[8] = {-0.5f, 0, 0, 0, 0, 0, 0, 0}, z[8] = {};
+        // Arm is refused with no weights, then on a short lead; nothing plays after a refusal.
+        CHECK(N60AncLaneFeedFeedForwardArm(r.feed, 0.010, 0.005) == N60FeedForwardLiveArmNoWeights, "arm without weights at %.0f", rate);
+        CHECK(N60AncLaneFeedSetFeedForwardWeights(r.feed, w, z, 1u), "weights (gate) at %.0f", rate);
+        CHECK(N60AncLaneFeedFeedForwardArm(r.feed, 0.001, 0.005) == N60FeedForwardLiveArmShortLead, "short lead at %.0f", rate);
+        N60AncLaneFeedArm(r.feed);
+        N60AncLaneFeedRenewLease(r.feed, leaseLongFrames);
+        uint64_t pushed = 0;
+        bool feeding = true;
+        auto pump = [&]() {
+            if (!feeding) return;
+            const uint64_t want = N60AncLaneFeedReferenceOutputIndex(r.feed) + 4u * kBlock + kBlock;
+            while (pushed < want) {
+                float chunk[kBlock];
+                for (uint32_t i = 0; i < kBlock; ++i)
+                    chunk[i] = 0.5f * std::sin(static_cast<float>(2.0 * M_PI * 60.0 * static_cast<double>(pushed + i) / rate));
+                pushed = N60AncLaneFeedPushReference(r.feed, pushed, chunk, kBlock);
+            }
+        };
+        double refused = 0.0;
+        for (int i = 0; i < 30; ++i) { pump(); block(r); refused = std::fmax(refused, sourcePeak(r)); }
+        CHECK(refused == 0.0, "output after a refused arm at %.0f", rate);
+        // Armed and fed: plays, no underruns.
+        CHECK(N60AncLaneFeedFeedForwardArm(r.feed, 0.010, 0.005) == N60FeedForwardLiveArmOK, "arm at %.0f", rate);
+        double loud = 0.0;
+        for (uint64_t done = 0; done < static_cast<uint64_t>(rate * 0.4); done += kBlock) { pump(); block(r); loud = std::fmax(loud, sourcePeak(r)); }
+        CHECK(loud > 0.02, "ff silent when armed and fed at %.0f", rate);
+        CHECK(N60AncLaneFeedGetStatus(r.feed).referenceUnderruns == 0u, "underruns while fed at %.0f", rate);
+        // The reference stops: play out what was pushed, then silence within the 50 ms ramp plus two callbacks, tripped for
+        // reference loss, and the filter cannot be re-armed without a reset.
+        feeding = false;
+        runFrames(r, 5u * kBlock + 2u * kBlock);
+        runFrames(r, fadeFrames + 2u * kBlock);
+        double after = 0.0;
+        for (int i = 0; i < 20; ++i) { block(r); after = std::fmax(after, sourcePeak(r)); }
+        CHECK(after < 1e-6, "output not silent (-120 dBFS; only the crossover tail may ring) after reference loss at %.0f (%g)", rate, after);
+        const N60FeedForwardLiveStatus lost = N60AncLaneFeedFeedForwardStatus(r.feed);
+        CHECK(lost.state == N60FeedForwardLiveTripped && lost.tripReason == N60FeedForwardLiveTripReferenceLost,
+              "state %u reason %u after loss at %.0f", lost.state, lost.tripReason, rate);
+        CHECK(N60AncLaneFeedGetStatus(r.feed).referenceUnderruns >= 2u, "underruns after loss at %.0f", rate);
+        CHECK(N60AncLaneFeedFeedForwardArm(r.feed, 0.010, 0.005) == N60FeedForwardLiveArmTripped, "tripped filter re-armed at %.0f", rate);
+        N60AncLaneFeedDestroy(r.feed);
+
+        // The reference ring: a late push is dropped (returns the output index), a gap push returns the end of the span.
+        Rig c;
+        CHECK(rigInit(c, rate, false, true, 0.05), "ring rig at %.0f", rate);
+        for (int i = 0; i < 4; ++i) block(c);
+        float ones[kBlock];
+        for (uint32_t i = 0; i < kBlock; ++i) ones[i] = 1.0f;
+        const uint64_t idx = N60AncLaneFeedReferenceOutputIndex(c.feed);
+        CHECK(idx == 4u * kBlock, "output index %llu at %.0f", static_cast<unsigned long long>(idx), rate);
+        CHECK(N60AncLaneFeedPushReference(c.feed, idx - kBlock, ones, kBlock) == idx, "late push return at %.0f", rate);
+        CHECK(N60AncLaneFeedPushReference(c.feed, idx + kBlock, ones, kBlock) == idx + 2u * kBlock, "gap push return at %.0f", rate);
+        N60AncLaneFeedDestroy(c.feed);
+    }
+
     if (failures == 0) std::printf("e26_anc_lane_feed: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

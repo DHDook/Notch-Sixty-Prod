@@ -17,7 +17,6 @@ clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/ff_e
 clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms.o"
 # E26: the bridge feeds the ANC lane (N60AncLaneFeed).
 clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/anc_lane_feed.cpp -o "$OUT/n60_anc_lane_feed.o"
-NO_BRIDGE="$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o $OUT/n60_aqz.o"
 ALL="$(find "$RT" -name '*.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o $OUT/n60_aqz.o"
 # libn60core objects, from the shared list (ci/core_sources.sh). The render kernel and
 # the realtime bridge both link them (N60LevelSessionProc, n60_graph_*).
@@ -27,11 +26,6 @@ for f in "${CORE_SOURCES[@]}"; do
   obj="$OUT/n60core_${f//\//_}.o"
   clang++ -std=c++20 -O3 -Wall -Wextra -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti -Icore/include -Icore/src -c "core/src/$f.cpp" -o "$obj"
   CORE_OBJS+=("$obj")
-done
-# shellcheck disable=SC2086
-for opt in O0 O3; do
-  clang -std=c11 -"$opt" -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
-    ci/benchmark_pr35_render_kernel.c $NO_BRIDGE "${CORE_OBJS[@]}" -lc++ -framework Accelerate -o "$OUT/render-$opt"
 done
 clang -std=c11 -O3 -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
   ci/benchmark_pr35_realtime_bridge.c $ALL "${CORE_OBJS[@]}" -lc++ \
