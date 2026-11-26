@@ -708,6 +708,7 @@ unified graph only.
 - [~] S1b `e23/precision-and-cleanup` (#707, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
 - [x] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h); K1 `e23/kernel-off-render-path` (E23 G22)
+- [ ] K1c `e23/binaural-au-rack` (owner, 26 Nov 2026; needs-owner, engine): host the Audio Unit rack as the binaural graph's EXTERNAL stage so Virtual Speakers with a rack starts instead of being refused; lands before K2 (E23 G38)
 - [x] T1 `e23/kernel-tests-xctest`: migrate or retire every kernel-referencing XCTest (graph-only, frozen corpus or retire; E23 G21)
 - [ ] T2 `e23/kernel-tests-harnesses`: migrate or retire every kernel-referencing C harness (E23 G21; G24 to K2, G25 to K3, G29 to K2)
 - [x] S4 part 4 `e23/s4-part4-setter-protection`: restore setter protection on the 63 relaxed properties and move the keyboard volume region, after E16 S2 (E23 G20)
