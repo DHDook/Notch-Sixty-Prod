@@ -60,12 +60,10 @@ extension AudioIOEngine {
             try session.publishDSPGraph(graph)
         }
 
-        gainConfiguration = configuration
-        ambientCompensationRuntimeTarget =
-            clampedAmbientTarget
-        activeQuietZoneRuntimeTarget =
-            candidateQuietZone
-        lastErrorDescription = nil
+        commitGainConfiguration(configuration)
+        commitAmbientCompensationRuntimeTarget(clampedAmbientTarget)
+        commitActiveQuietZoneRuntimeTarget(candidateQuietZone)
+        setLastError(nil)
     }
 
     func applyRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
@@ -113,7 +111,7 @@ extension AudioIOEngine {
                 // invoking a fade-through-silence transition.
                 try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
-                activeRoomCorrectionProgram = nil
+                programs.setActiveRoomCorrectionProgram(nil)
             } else if configuration.isActiveOnStereoKernel {
                 guard let filter = configuration.filter else {
                     throw RoomCorrectionConfigurationError.filterRequired
@@ -122,7 +120,7 @@ extension AudioIOEngine {
                 try attachRoomCorrectionProgram(preparedProgram, to: &graph)
                 try applyAudioUnitRackLatency(to: &graph)
                 try session.transitionDSPGraph(graph)
-                activeRoomCorrectionProgram = preparedProgram
+                programs.setActiveRoomCorrectionProgram(preparedProgram)
             } else {
                 if activeRoomCorrectionProgram != nil {
                     try applyAudioUnitRackLatency(to: &graph)
@@ -131,21 +129,21 @@ extension AudioIOEngine {
                     try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
                 }
-                activeRoomCorrectionProgram = nil
+                programs.setActiveRoomCorrectionProgram(nil)
             }
         } else {
-            activeRoomCorrectionProgram = nil
+            programs.setActiveRoomCorrectionProgram(nil)
         }
 
         // A lane plan cannot run on the stereo kernel (two-band stages, per-lane delays): the session plays uncorrected
         // and says why (Q9, owner 1 Nov 2026). N-channel sessions set the reason while they build the graph.
         if transportSession != nil {
-            roomCorrectionInactiveReason = configuration.enabled && configuration.lanes != nil ? .needsSpeakerProfile : nil
+            programs.setRoomCorrectionInactiveReason(configuration.enabled && configuration.lanes != nil ? .needsSpeakerProfile : nil)
         } else if !immutableSemanticTransportActive {
-            roomCorrectionInactiveReason = nil
+            programs.setRoomCorrectionInactiveReason(nil)
         }
-        roomCorrectionConfiguration = configuration
-        lastErrorDescription = nil
+        commitRoomCorrectionConfiguration(configuration)
+        setLastError(nil)
     }
 
     /// E24 S3b: synthesises the lane plan at every rate the selected output exposes, before a deploy commits (Q8), so a
@@ -206,7 +204,7 @@ extension AudioIOEngine {
                 }
                 try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
-                activeSpeakerIRProgram = nil
+                programs.setActiveSpeakerIRProgram(nil)
             } else if configuration.enabled {
                 guard let filter = configuration.filter else {
                     throw SpeakerIRConfigurationError.filterRequired
@@ -215,7 +213,7 @@ extension AudioIOEngine {
                 try attachSpeakerIRProgram(preparedProgram, to: &graph)
                 try applyAudioUnitRackLatency(to: &graph)
                 try session.transitionDSPGraph(graph)
-                activeSpeakerIRProgram = preparedProgram
+                programs.setActiveSpeakerIRProgram(preparedProgram)
             } else {
                 if activeSpeakerIRProgram != nil {
                     try applyAudioUnitRackLatency(to: &graph)
@@ -224,14 +222,14 @@ extension AudioIOEngine {
                     try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
                 }
-                activeSpeakerIRProgram = nil
+                programs.setActiveSpeakerIRProgram(nil)
             }
         } else {
-            activeSpeakerIRProgram = nil
+            programs.setActiveSpeakerIRProgram(nil)
         }
 
-        speakerIRConfiguration = configuration
-        lastErrorDescription = nil
+        commitSpeakerIRConfiguration(configuration)
+        setLastError(nil)
     }
 
     /// The EQ FIR taps for the configured channel mode (left and optional second channel padded to one length), their
@@ -258,7 +256,7 @@ extension AudioIOEngine {
         let primary = try eqFIRTaps(configuration, sampleRate: session.outputFormat.sampleRate)
         let secondaryTaps = primary.right
 
-        let slot = nextEQFIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let slot = programs.eqFIRSlotToUse
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareConvolutionProgram(
@@ -270,7 +268,7 @@ extension AudioIOEngine {
         } catch {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
-        nextEQFIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        programs.advanceEQFIRSlot(after: slot)
         return PreparedEQFIRProgram(
             slot: slot,
             programInfo: programInfo,
@@ -309,7 +307,7 @@ extension AudioIOEngine {
               abs(adaptedRate - sampleRate) < 0.5 else {
             return filter
         }
-        adaptedRoomCorrectionFilter = (filter, sampleRate, adapted)
+        programs.setAdaptedRoomCorrectionFilter(source: filter, sampleRate: sampleRate, filter: adapted)
         return adapted
     }
 
@@ -345,7 +343,7 @@ extension AudioIOEngine {
             sampleRate: session.outputFormat.sampleRate
         )
 
-        let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let slot = programs.roomCorrectionSlotToUse
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareRoomCorrectionProgram(
@@ -357,7 +355,7 @@ extension AudioIOEngine {
         } catch {
             throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
         }
-        nextRoomCorrectionProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        programs.advanceRoomCorrectionSlot(after: slot)
         return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
     }
 
@@ -375,7 +373,7 @@ extension AudioIOEngine {
     ) throws -> PreparedSpeakerIRProgram {
         let filter = try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
 
-        let slot = nextSpeakerIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let slot = programs.speakerIRSlotToUse
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareSpeakerIRProgram(
@@ -387,7 +385,7 @@ extension AudioIOEngine {
         } catch {
             throw SpeakerIRConfigurationError.convolutionProgramUnavailable
         }
-        nextSpeakerIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        programs.advanceSpeakerIRSlot(after: slot)
         return PreparedSpeakerIRProgram(slot: slot, programInfo: programInfo)
     }
 
@@ -406,7 +404,7 @@ extension AudioIOEngine {
     ) throws -> UnifiedGraphProgramDSP? {
         guard unifiedGraphEnabled else {
             let room = candidate?.room ?? roomCorrectionConfiguration
-            roomCorrectionInactiveReason = room.enabled && room.lanes != nil ? .needsUnifiedGraph : nil
+            programs.setRoomCorrectionInactiveReason(room.enabled && room.lanes != nil ? .needsUnifiedGraph : nil)
             return nil
         }
         let inputs = candidate ?? currentLiveGraphInputs
@@ -566,7 +564,7 @@ extension AudioIOEngine {
             program.laneDelayFrames = installedLanes.delays
             program.subLaneCount = subwooferCount ?? 0
         }
-        roomCorrectionInactiveReason = inactive
+        self.programs.setRoomCorrectionInactiveReason(inactive)
         return program.isNeutral && program.foldedBass == nil ? nil : program
     }
 }

@@ -9,7 +9,7 @@ extension AudioIOEngine {
 
     func importNormalizedBinauralProfile(from url: URL) throws -> BinauralProfileReference {
         let reference = try binauralProfileAssetStore.importNormalizedDocument(from: url)
-        lastErrorDescription = nil
+        setLastError(nil)
         return reference
     }
 
@@ -20,8 +20,8 @@ extension AudioIOEngine {
         guard lifecycle.state == .idle || configuration == speakerDriverProcessingConfiguration else {
             throw SpeakerDriverProcessingError.changesRequireIdle
         }
-        speakerDriverProcessingConfiguration = configuration
-        lastErrorDescription = nil
+        commitSpeakerDriverProcessingConfiguration(configuration)
+        setLastError(nil)
     }
 
     func replaceBassManagementConfiguration(_ configuration: BassManagementConfiguration) throws {
@@ -99,8 +99,8 @@ extension AudioIOEngine {
             try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
         }
-        bassManagementConfiguration = configuration
-        lastErrorDescription = nil
+        commitBassManagementConfiguration(configuration)
+        setLastError(nil)
     }
 
     @discardableResult
@@ -220,13 +220,13 @@ extension AudioIOEngine {
     }
 
     func setDynamicsListenerMirror(_ listener: DynamicsListener?, solo: Set<Int>) {
-        if dynamicsListener != listener { dynamicsListener = listener }
-        if dynamicsSoloBands != solo { dynamicsSoloBands = solo }
+        if dynamicsListener != listener { commitDynamicsListener(listener) }
+        if dynamicsSoloBands != solo { commitDynamicsSoloBands(solo) }
     }
 
     var dynamicsHasStereoSession: Bool { transportSession != nil }
 
-    func reportDynamicsListenError(_ message: String) { lastErrorDescription = message }
+    func reportDynamicsListenError(_ message: String) { setLastError(message) }
 
     /// Where the live graph runs, `true` when the frozen kernel renders instead (so the extras cannot play).
     var dynamicsKernelRenders: Bool {
@@ -317,10 +317,10 @@ extension AudioIOEngine {
                 try session.publishDSPGraph(graph)
             }
         }
-        dynamicsConfiguration = configuration
+        commitDynamicsConfiguration(configuration)
         extrasStored = true
         committed = true
-        lastErrorDescription = nil
+        setLastError(nil)
         surfaceDynamicsListenRepostFailure()  // E28 S7d part 3 (G37): a rebuild that lost the listener is reported, not swallowed
     }
 

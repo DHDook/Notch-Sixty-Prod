@@ -15,7 +15,7 @@ enum QuietZoneFlagWiring {
         let adaptiveTonalLive = flags.isEnabled(.adaptiveTonalLive) && engine.activeQuietZoneLeaseEnabled
         engine.adaptiveTonalMailboxEnabled = adaptiveTonalLive
         // E4 S22b1: only this flag lets the speaker-drive recording be requested at all.
-        engine.speakerDriveFeatureEnabled = flags.isEnabled(.feedForwardLive)
+        engine.setSpeakerDriveFeatureEnabled(flags.isEnabled(.feedForwardLive))
         return adaptiveTonalLive
     }
 

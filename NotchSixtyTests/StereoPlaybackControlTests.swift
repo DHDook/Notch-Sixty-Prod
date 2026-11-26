@@ -417,7 +417,7 @@ final class StereoPlaybackControlTests: XCTestCase {
         defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
-        // E23 T1 (G28): the kernel let a global bypass win over the delta audition; the graph runs the delta audition
+        // E23 T1 (G31): the kernel let a global bypass win over the delta audition; the graph runs the delta audition
         // (processed minus aligned input) and reads zero, so only the bypass is published here. The combination is not
         // reachable from the UI (E23 G17: no production Delta control), and S9 decides that control.
         graph.bypassed = true
@@ -684,7 +684,7 @@ final class StereoPlaybackControlTests: XCTestCase {
                 true
             )
         )
-        // E23 T1 (G28): bypass only; the graph runs a delta audition ahead of the bypass (see
+        // E23 T1 (G31): bypass only; the graph runs a delta audition ahead of the bypass (see
         // `testGlobalBypassStillAppliesMasterGain`). The graph pads the lanes to the published latency, so the raw
         // input comes out that many frames late.
         graph.bypassed = true
@@ -806,7 +806,7 @@ final class StereoPlaybackControlTests: XCTestCase {
             XCTAssertEqual(diagnostics.latencyFrames, roomLatency)
 
             // E23 T1: the graph keeps the stereo crossover under bypass (parity exception P1) and runs a delta audition
-            // ahead of it (G28), so the raw-bypass check switches both off and expects the input after the published latency.
+            // ahead of it (G31), so the raw-bypass check switches both off and expects the input after the published latency.
             changed.bypassed = true
             changed.crossover.enabled = false
             XCTAssertTrue(kernel.publish(changed))
