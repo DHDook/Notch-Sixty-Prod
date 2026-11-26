@@ -28,7 +28,6 @@ final class AuditionOverrideTests: XCTestCase {
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: "audition-out")
-        engine.unifiedGraphEnabled = true
         return engine
     }
 

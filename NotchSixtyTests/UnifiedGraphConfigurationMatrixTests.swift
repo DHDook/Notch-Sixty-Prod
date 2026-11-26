@@ -130,6 +130,48 @@ final class UnifiedGraphConfigurationMatrixTests: XCTestCase {
         }
     }
 
+    /// E23 K1c (G38): Virtual Speakers with an Audio Unit rack. The rack is the graph's EXTERNAL stage over every program
+    /// lane; a half-gain rack halves the ears (the binaural renderer after it is linear) at every rate and layout.
+    func testBinauralLayoutsWithAnAudioUnitRackRenderAtEveryRate() throws {
+        let process: N60AudioUnitLiveRackProcessFunction = { context, input, output, frames, channels, _ in
+            let gain = context!.assumingMemoryBound(to: Float.self).pointee
+            for i in 0..<Int(frames * channels) { output[i] = input[i] * gain }
+            return true
+        }
+        for rate in Self.rates {
+            for (identifier, channels) in [(UInt32(N60_LAYOUT_5_1.rawValue), 6), (UInt32(N60_LAYOUT_7_1.rawValue), 8)] {
+                let taps: UInt32 = 4
+                var responses = [Float](repeating: 0, count: channels * 2 * Int(taps))
+                for lane in 0..<channels { for ear in 0..<2 { responses[(lane * 2 + ear) * Int(taps)] = 0.4 } }
+                let plainSpec = try UnifiedGraphTranslator.layoutSpec(
+                    layoutIdentifier: identifier, sampleRate: rate,
+                    binaural: UnifiedGraphTranslator.BinauralProfile(taps: taps, equalEarChannel: 3, responses: responses),
+                    protection: false)
+                let racked = try CoreAudioBinauralHeadphoneTransportSession.insertingRackStage(
+                    into: plainSpec, latencyFrames: 0, laneCount: channels)
+                let gain = UnsafeMutablePointer<Float>.allocate(capacity: 1)
+                gain.pointee = 0.5
+                defer { gain.deallocate() }
+                let processor = N60AudioUnitLiveRackProcessor(
+                    context: UnsafeMutableRawPointer(gain), process: process, faultLatch: nil,
+                    channelCount: UInt32(channels), maximumFramesPerSlice: 512, latencyFrames: 0)
+                let adapter = try XCTUnwrap(withUnsafePointer(to: processor) { N60GraphAudioUnitRackCreate($0) })
+                let plain = try UnifiedGraphHost(spec: plainSpec)
+                let host = try UnifiedGraphHost(spec: racked)
+                let raw = try XCTUnwrap(host.rawGraph)
+                XCTAssertTrue(N60GraphAudioUnitRackBind(adapter, OpaquePointer(raw)))
+                defer { N60GraphAudioUnitRackDestroy(adapter); host.release(); plain.release() }
+                let plainLevels = try render(plain, rate: rate, label: "binaural \(channels) plain")
+                let rackLevels = try render(host, rate: rate, label: "binaural \(channels) racked")
+                for ear in 0..<2 {
+                    XCTAssertGreaterThan(rackLevels[ear], 0.001, "binaural \(channels) rack rate \(rate)")
+                    XCTAssertEqual(rackLevels[ear], plainLevels[ear] * 0.5, accuracy: plainLevels[ear] * 0.01,
+                                   "binaural \(channels) rack rate \(rate) ear \(ear)")
+                }
+            }
+        }
+    }
+
     // MARK: Stored profiles
 
     /// Every stored factory content preset on every stored system profile: it either loads and

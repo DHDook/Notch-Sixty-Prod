@@ -134,7 +134,6 @@ final class SystemAuditionSidesTests: XCTestCase {
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: "sides-out")
-        engine.unifiedGraphEnabled = true
         return engine
     }
 

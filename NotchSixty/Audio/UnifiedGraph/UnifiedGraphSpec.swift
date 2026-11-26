@@ -328,15 +328,18 @@ extension UnifiedGraphSpec {
         N60_STAGE_EXPANDER, N60_STAGE_METER_OUT,
     ].reduce(into: Set<UInt32>()) { $0.insert($1.rawValue) }
 
-    /// A copy with the AU rack's EXTERNAL stage on both stereo lanes, at the kernel's rack seam. The declared
-    /// latency is the rack's reported latency; the stage starts active (the rack's own bypass is its runtime).
-    func insertingExternalRackStage(latencyFrames: UInt32) -> UnifiedGraphSpec {
+    /// A copy with the AU rack's EXTERNAL stage on lanes 0..<laneCount (both stereo lanes by default; every program lane
+    /// for Virtual Speakers, E23 K1c), at the rack seam (rank 12.5: after program EQ and dynamics, before bass management
+    /// and the binaural renderer). The declared latency is the rack's reported latency; the stage starts active (the rack's
+    /// own bypass is its runtime). An existing EXTERNAL stage is replaced; callers that must not replace one check first.
+    func insertingExternalRackStage(latencyFrames: UInt32, laneCount: Int = 2) -> UnifiedGraphSpec {
         var copy = self
         copy.stages.removeAll { $0.kind == N60_STAGE_EXTERNAL.rawValue }
         let index = (copy.stages.lastIndex { Self.beforeRackKinds.contains($0.kind) }).map { $0 + 1 } ?? 0
         copy.stages.insert(UnifiedGraphStageSpec(
             kind: N60_STAGE_EXTERNAL.rawValue, stageId: Self.externalRackStageId, laneA: 0,
-            laneMask: 0b11, capacityFrames: latencyFrames, params: [1]
+            laneMask: laneCount >= 64 ? UInt64.max : (UInt64(1) << UInt64(laneCount)) - 1,
+            capacityFrames: latencyFrames, params: [1]
         ), at: index)
         return copy
     }

@@ -82,6 +82,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     /// rebuilding the response set.
     private(set) var unifiedGraphBaseSpec: UnifiedGraphSpec?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
+    /// E23 K1c: the graph the Audio Unit rack's adapter is bound to (once per graph; control thread only).
+    private var rackBoundGraph: UnsafeMutableRawPointer?
     private let captureSource = ProcessTapCaptureSource()
     /// E36 S3b: set when the driver path is chosen; then there is no tap, no aggregate and no capture IOProc.
     private var driverAttachment: DriverCaptureAttachment?
@@ -262,7 +264,6 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             if let audioUnitRack {
                 guard abs(audioUnitRack.format.sampleRate - outputFormat.sampleRate) < 0.5,
                       audioUnitRack.format.channelCount == Int(expectedChannels),
-                      outputBufferFrames <= UInt32(audioUnitRack.format.maximumFramesPerSlice),
                       N60BinauralHeadphoneBridgeConfigureAudioUnitRack(
                         newBridge,
                         audioUnitRack.processor
@@ -277,9 +278,20 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                 return LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
             guard let spec = unifiedGraphSpec else { throw rejection(.specRejected) }
-            if audioUnitRack != nil { throw rejection(.unsupportedRoute) }
+            // E23 K1c: the rack is the graph's EXTERNAL stage over every program lane; the adapter slices a block
+            // larger than the rack's maximumFramesPerSlice itself.
+            var startSpec = spec
+            if let audioUnitRack {
+                do {
+                    startSpec = try Self.insertingRackStage(
+                        into: spec, latencyFrames: audioUnitRack.latencyFrames, laneCount: programLayout.roles.count)
+                } catch {
+                    N60BinauralHeadphoneBridgeDestroy(newBridge)
+                    throw error
+                }
+            }
             switch Self.makeUnifiedGraph(
-                spec: spec,
+                spec: startSpec,
                 bridge: newBridge,
                 sampleRate: outputFormat.sampleRate,
                 laneCount: programLayout.roles.count,
@@ -287,6 +299,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             ) {
             case .success(let host):
                 unifiedGraphHost = host
+                if audioUnitRack != nil { rackBoundGraph = host.rawGraph }
                 unifiedGraphBaseSpec = baseSpec
                 // The graph's INPUT_GAIN stage carries the program gain from here on, so it can follow
                 // live edits; the bridge must not apply it a second time.
@@ -456,15 +469,46 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
         var spec = spec
+        if let audioUnitRack {
+            spec = try Self.insertingRackStage(
+                into: spec, latencyFrames: audioUnitRack.latencyFrames, laneCount: programLayout.roles.count)
+        }
         // The head pose is live state of the BINAURAL stage; a new response set must not snap the image back to 0.
         if let current = host.spec.stages.first(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
            let index = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
            current.params.count >= 3, spec.stages[index].params.count >= 3 {
             for offset in 0..<3 { spec.stages[index].params[offset] = current.params[offset] }
         }
-        do { return try host.apply(spec) } catch {
+        do {
+            let result = try host.apply(spec)
+            // The rack stays bound across posts and rebuilds of the same graph; bind again only if the graph changed.
+            // UnifiedGraphHost builds its graph once, so today this branch does not run; keep it only while that holds.
+            if audioUnitRack != nil, let raw = host.rawGraph, rackBoundGraph != raw {
+                guard let bridge, N60BinauralHeadphoneBridgeBindRackToGraph(bridge, raw) else {
+                    throw LiveNChannelTransportError.unifiedGraphRejected(.attachFailed)
+                }
+                rackBoundGraph = raw
+            }
+            return result
+        } catch let error as LiveNChannelTransportError {
+            throw error
+        } catch {
             throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
         }
+    }
+
+    /// E23 K1c: `spec` with the Audio Unit rack's EXTERNAL stage over lanes 0..<laneCount. Refuses by name when the spec
+    /// already uses the graph's one EXTERNAL slot, and fails when the rack's latency is more than the stage can declare.
+    static func insertingRackStage(
+        into spec: UnifiedGraphSpec, latencyFrames: Int, laneCount: Int
+    ) throws -> UnifiedGraphSpec {
+        guard !spec.stages.contains(where: { $0.kind == N60_STAGE_EXTERNAL.rawValue }) else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.externalStageInUse)
+        }
+        guard latencyFrames >= 0, latencyFrames <= Int(N60_GRAPH_MAX_DELAY_FRAMES) else {
+            throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+        }
+        return spec.insertingExternalRackStage(latencyFrames: UInt32(latencyFrames), laneCount: laneCount)
     }
 
     /// E6 S9c: records the graph-before-program-DSP that the last accepted republish was built from, so the next live
@@ -487,9 +531,21 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         guard let host = try? UnifiedGraphHost(spec: spec), let raw = host.rawGraph else {
             return .failure(.graphBuildFailed)
         }
+        // E23 K1c: the rack's adapter is registered before the graph is attached (IO is stopped), so the first block
+        // already finds its callback.
+        let hasRack = bridge.pointee.graphRack != nil
+        if hasRack, !N60BinauralHeadphoneBridgeBindRackToGraph(bridge, raw) {
+            host.release()
+            return .failure(.attachFailed)
+        }
         guard N60BinauralHeadphoneBridgeAttachGraph(
             bridge, raw, spec.inputChannels, spec.maxBlockFrames
-        ) else { return .failure(.attachFailed) }
+        ) else {
+            // Clear the callback before the graph is retired, so the bridge never unbinds a freed graph.
+            N60GraphAudioUnitRackUnbind(bridge.pointee.graphRack)
+            host.release()
+            return .failure(.attachFailed)
+        }
         return .success(host)
     }
 
@@ -622,6 +678,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         graphReferenceLock.unlock()
         retiring?.release()
         audioUnitRack = nil
+        rackBoundGraph = nil
     }
 
     private func startIO() throws {
