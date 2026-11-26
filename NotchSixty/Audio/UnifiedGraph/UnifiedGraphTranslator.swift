@@ -1201,7 +1201,8 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case snapshotDelay
     case snapshotGain
     case protectionCeilingOutOfRange
-    /// Retired in E6 S8e (those routes render through the graph); kept so diagnostics stay stable.
+    /// Retired in E6 S8e (those routes render through the graph); kept so diagnostics stay stable. K1a briefly
+    /// reused it for Virtual Speakers with a rack; E23 K1c retired that refusal (the rack is the graph's EXTERNAL stage).
     case unsupportedRoute
     /// Stereo: headphone DSP is configured.
     case headphoneDSP
@@ -1236,6 +1237,8 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case noFrontPair
     /// Room correction, speaker IR or an image stage with Virtual Speakers (they act on speakers, not ears).
     case virtualSpeakersSpeakerStage
+    /// E23 K1c: the spec already has an EXTERNAL stage, so the Audio Unit rack cannot take the graph's single slot.
+    case externalStageInUse
 
     /// Maps the snapshot eligibility result to its named refusal.
     static func eligibility(_ reason: N60UnifiedGraphUnsupportedReason) -> UnifiedGraphFallbackReason {
@@ -1304,6 +1307,7 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .stageBudget: "more than 256 graph stages"
         case .noFrontPair: "layout has no front left/right pair"
         case .virtualSpeakersSpeakerStage: "room, speaker IR or image stage with Virtual Speakers"
+        case .externalStageInUse: "graph already has an external stage, so the Audio Unit rack has no slot"
         }
     }
 }

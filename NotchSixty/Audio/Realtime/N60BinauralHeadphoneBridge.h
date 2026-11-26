@@ -17,6 +17,7 @@
 #include "N60LoudnessCapture.h"
 #include "N60Protection.h"
 #include "n60/graph.h"
+#include "../UnifiedGraph/N60GraphAudioUnitRack.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,8 +54,9 @@ typedef struct N60BinauralHeadphoneBridge {
     N60HeadTrackedBinauralRuntime * _Nullable binauralRuntime;
     N60HeadphoneDSPRuntime * _Nullable headphoneRuntime;
     N60ProtectionRuntime * _Nullable protectionRuntime;
-    N60AudioUnitLiveRackProcessor audioUnitRack;
-    float * _Nullable audioUnitRackScratch;
+    // E23 K1c: the Audio Unit rack is the graph's EXTERNAL stage (after program EQ and dynamics, before the binaural
+    // renderer). The adapter owns the processor copy and its scratch; the bridge only stores the block sample time.
+    N60GraphAudioUnitRack * _Nullable graphRack;
     N60ProgramInputMap inputMap;
     N60BinauralProfileDescriptor binauralDescriptor;
     N60HeadphoneDSPSnapshot headphoneSnapshot;
@@ -276,7 +278,9 @@ static inline void N60BinauralHeadphoneBridgeDestroy(
     N60HeadTrackedBinauralRuntimeDestroy(bridge->binauralRuntime);
     N60HeadphoneDSPRuntimeDestroy(bridge->headphoneRuntime);
     N60ProtectionRuntimeDestroy(bridge->protectionRuntime);
-    free(bridge->audioUnitRackScratch);
+    // The adapter clears its graph callback first, so a graph that outlives the bridge never calls freed memory.
+    N60GraphAudioUnitRackDestroy(bridge->graphRack);
+    bridge->graphRack = NULL;
     free(bridge->graphScratch);
     N60LoudnessCaptureDestroy(bridge->loudnessCapture);
     bridge->loudnessCapture = NULL;
@@ -328,33 +332,41 @@ static inline bool N60BinauralHeadphoneBridgeReset(
     return true;
 }
 
+/// Control plane, IO stopped. Builds the rack adapter for `processor` (channels equal to the program's). The rack runs
+/// only inside the graph, so it does nothing until N60BinauralHeadphoneBridgeBindRackToGraph.
 static inline bool N60BinauralHeadphoneBridgeConfigureAudioUnitRack(
     N60BinauralHeadphoneBridge * _Nonnull bridge,
     N60AudioUnitLiveRackProcessor processor
 ) {
     if (bridge == NULL
         || bridge->transport == NULL
-        || bridge->audioUnitRack.context != NULL
+        || bridge->graphRack != NULL
         || !N60AudioUnitLiveRackProcessorIsValid(&processor)
         || processor.channelCount
-            != bridge->binauralDescriptor.programLayout.channelCount
-        || processor.maximumFramesPerSlice
-            > bridge->transport->capacityFrames) {
+            != bridge->binauralDescriptor.programLayout.channelCount) {
         return false;
     }
+    bridge->graphRack = N60GraphAudioUnitRackCreate(&processor);
+    return bridge->graphRack != NULL;
+}
 
-    const size_t sampleCount =
-        (size_t)bridge->transport->capacityFrames
-        * bridge->binauralDescriptor.programLayout.channelCount;
-    float *scratch = (float *)calloc(
-        sampleCount,
-        sizeof(float)
-    );
-    if (scratch == NULL) return false;
+/// The rack's reported latency in frames (0 without a rack). The graph's EXTERNAL stage declares this, so it is
+/// counted once, inside n60_graph_latency_frames.
+static inline uint64_t N60BinauralHeadphoneBridgeRackLatencyFrames(
+    const N60BinauralHeadphoneBridge * _Nullable bridge
+) {
+    return bridge != NULL ? N60GraphAudioUnitRackLatencyFrames(bridge->graphRack) : 0u;
+}
 
-    bridge->audioUnitRack = processor;
-    bridge->audioUnitRackScratch = scratch;
-    return true;
+/// Control plane, IO stopped. Registers the rack as `graph`'s EXTERNAL-stage callback over every program lane. The
+/// graph must carry the EXTERNAL stage (UnifiedGraphSpec.insertingExternalRackStage) and outlive the bridge or be
+/// unbound first. Binding the graph already bound is a no-op.
+static inline bool N60BinauralHeadphoneBridgeBindRackToGraph(
+    N60BinauralHeadphoneBridge * _Nonnull bridge,
+    void * _Nonnull graphHandle
+) {
+    if (bridge == NULL || graphHandle == NULL || bridge->graphRack == NULL) return false;
+    return N60GraphAudioUnitRackBind(bridge->graphRack, (n60_graph *)graphHandle);
 }
 
 static inline void N60BinauralHeadphoneBridgeSetOutputGain(
@@ -435,16 +447,11 @@ static inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(
         ? bridge->headphoneSnapshot.channels[0].delayFrames
         : bridge->headphoneSnapshot.channels[1].delayFrames;
     if (bridge->unifiedGraph != NULL) {
-        // The graph reports the binaural, headphone and protection latency together.
-        return (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
-                ? bridge->audioUnitRack.latencyFrames
-                : 0u)
-            + (uint64_t)n60_graph_latency_frames(bridge->unifiedGraph);
+        // The graph reports the rack (its EXTERNAL stage declares the rack's latency), binaural, headphone and
+        // protection latency together, so nothing is added here.
+        return (uint64_t)n60_graph_latency_frames(bridge->unifiedGraph);
     }
-    return (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
-            ? bridge->audioUnitRack.latencyFrames
-            : 0u)
-        + N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)
+    return N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)
         + correctionDelay
         + (uint64_t)N60ProtectionSnapshotLatencyFrames(&bridge->protectionSnapshot);
 }
@@ -582,7 +589,6 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
     (void)inNow;
     (void)inInputData;
     (void)inInputTime;
-    (void)inOutputTime;
 
     N60BinauralHeadphoneBridge *bridge = (N60BinauralHeadphoneBridge *)inClientData;
     if (bridge == NULL
@@ -649,68 +655,9 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
 
     const uint32_t programChannels =
         bridge->binauralDescriptor.programLayout.channelCount;
-    const bool rackConfigured =
-        N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
     // E28 S6b: loudness capture for this block (frames == 0 without demand).
     N60LoudnessCapture * const loudness = bridge->loudnessCapture;
     const N60LoudnessCaptureBlock loudnessBlock = N60LoudnessCaptureBeginBlock(loudness, frameCount);
-
-    if (rackConfigured) {
-        if (frameCount > bridge->audioUnitRack.maximumFramesPerSlice
-            || bridge->audioUnitRackScratch == NULL) {
-            N60BinauralHeadphoneZeroOutput(outOutputData);
-            atomic_fetch_add_explicit(
-                &bridge->renderFailures, 1u, memory_order_relaxed
-            );
-            // Consume this quantum so a rejected callback costs silence, not
-            // a permanent quantum of extra buffered latency.
-            N60ProgramTransportFrame discarded = {0};
-            for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
-                (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
-            }
-            return noErr;
-        }
-
-        for (uint32_t frameIndex = 0;
-             frameIndex < frameCount;
-             ++frameIndex) {
-            N60ProgramTransportFrame program = {0};
-            (void)N60ProgramTransportDequeueFrame(
-                bridge->transport,
-                &program
-            );
-            float *destination =
-                bridge->audioUnitRackScratch
-                + (size_t)frameIndex * programChannels;
-            for (uint32_t channel = 0;
-                 channel < programChannels;
-                 ++channel) {
-                destination[channel] =
-                    program.channels[channel]
-                    * bridge->programGainLinear;
-            }
-        }
-
-        const double sampleTime =
-            inOutputTime != NULL
-            && (inOutputTime->mFlags
-                & kAudioTimeStampSampleTimeValid) != 0
-                ? inOutputTime->mSampleTime
-                : 0.0;
-        if (!N60AudioUnitLiveRackProcess(
-                &bridge->audioUnitRack,
-                bridge->audioUnitRackScratch,
-                bridge->audioUnitRackScratch,
-                frameCount,
-                programChannels,
-                sampleTime)) {
-            N60BinauralHeadphoneZeroOutput(outOutputData);
-            atomic_fetch_add_explicit(
-                &bridge->renderFailures, 1u, memory_order_relaxed
-            );
-            return noErr;
-        }
-    }
 
     // E6 S8b2d graph path: gather the block's program input (with the program gain) into planar
     // scratch and render the whole block through libn60core; the per-frame loop below then only
@@ -724,11 +671,9 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         // A block larger than the graph was sized for: silence, never a mixed render.
         N60BinauralHeadphoneZeroOutput(outOutputData);
         atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
-        if (!rackConfigured) {
-            N60ProgramTransportFrame discarded = {0};
-            for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
-                (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
-            }
+        N60ProgramTransportFrame discarded = {0};
+        for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
+            (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
         }
         return noErr;
     }
@@ -742,13 +687,9 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
             N60ProgramTransportFrame gathered = {0};
             const float *source = gathered.channels;
-            if (rackConfigured) {
-                source = bridge->audioUnitRackScratch + (size_t)frameIndex * programChannels;
-            } else {
-                (void)N60ProgramTransportDequeueFrame(bridge->transport, &gathered);
-                for (uint32_t channel = 0; channel < programChannels; ++channel) {
-                    gathered.channels[channel] *= bridge->programGainLinear;
-                }
+            (void)N60ProgramTransportDequeueFrame(bridge->transport, &gathered);
+            for (uint32_t channel = 0; channel < programChannels; ++channel) {
+                gathered.channels[channel] *= bridge->programGainLinear;
             }
             for (uint32_t channel = 0; channel < programChannels; ++channel) {
                 planarIn[channel * stride + frameIndex] = source[channel];
@@ -760,6 +701,15 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         for (uint32_t channel = 0; channel < programChannels; ++channel) {
             inPointers[channel] = planarIn + channel * stride;
             outPointers[channel] = planarOut + channel * stride;
+        }
+        // E23 K1c: the rack runs inside the graph's EXTERNAL stage; it reads this block's host sample time.
+        if (bridge->graphRack != NULL) {
+            N60GraphAudioUnitRackSetBlockSampleTime(
+                bridge->graphRack,
+                inOutputTime != NULL && (inOutputTime->mFlags & kAudioTimeStampSampleTimeValid) != 0
+                    ? inOutputTime->mSampleTime
+                    : 0.0
+            );
         }
         graphRendered = n60_graph_process(graph, inPointers, outPointers, frameCount)
             == N60_STATUS_OK;
@@ -806,24 +756,15 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
             continue;
         }
         N60ProgramTransportFrame program = {0};
-        if (rackConfigured) {
-            memcpy(
-                program.channels,
-                bridge->audioUnitRackScratch
-                    + (size_t)frameIndex * programChannels,
-                (size_t)programChannels * sizeof(float)
-            );
-        } else {
-            (void)N60ProgramTransportDequeueFrame(
-                bridge->transport,
-                &program
-            );
-            for (uint32_t channel = 0;
-                 channel < programChannels;
-                 ++channel) {
-                program.channels[channel] *=
-                    bridge->programGainLinear;
-            }
+        (void)N60ProgramTransportDequeueFrame(
+            bridge->transport,
+            &program
+        );
+        for (uint32_t channel = 0;
+             channel < programChannels;
+             ++channel) {
+            program.channels[channel] *=
+                bridge->programGainLinear;
         }
 
         if (loudnessBlock.frames != 0u) {
