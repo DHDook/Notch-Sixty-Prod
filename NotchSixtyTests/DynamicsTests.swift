@@ -126,22 +126,22 @@ final class DynamicsTests: XCTestCase {
     }
 
     func testKernelGlobalBypassOverridesDynamics() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         var dynamics = N60DynamicsSnapshotMakeBypassed(96_000)
         XCTAssertTrue(N60DynamicsSnapshotSetCompressor(&dynamics, 96_000, true, -40, 20, 0, 0.1, 20, 0))
         graph.dynamics = dynamics
         graph.bypassed = true
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for _ in 0..<2_000 {
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, 0.5, -0.25, &left, &right)
+            kernel.processFrame(0.5, -0.25, &left, &right)
             XCTAssertEqual(left, 0.5, accuracy: 0.000_001)
             XCTAssertEqual(right, -0.25, accuracy: 0.000_001)
         }
@@ -246,10 +246,10 @@ final class DynamicsTests: XCTestCase {
     }
 
     func testKernelGlobalBypassOverridesPR28Dynamics() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         var dynamics = N60DynamicsSnapshotMakeBypassed(96_000)
@@ -260,12 +260,12 @@ final class DynamicsTests: XCTestCase {
         ))
         graph.dynamics = dynamics
         graph.bypassed = true
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for _ in 0..<4_000 {
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, 0.5, -0.25, &left, &right)
+            kernel.processFrame(0.5, -0.25, &left, &right)
             XCTAssertEqual(left, 0.5, accuracy: 0.000_001)
             XCTAssertEqual(right, -0.25, accuracy: 0.000_001)
         }

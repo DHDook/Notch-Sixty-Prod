@@ -3,10 +3,10 @@ import XCTest
 
 final class StereoPlaybackControlTests: XCTestCase {
     func testIndependentLeftEQDoesNotProcessRightChannel() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(
@@ -21,7 +21,7 @@ final class StereoPlaybackControlTests: XCTestCase {
                 true
             )
         )
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var inputSquare = 0.0
         var leftSquare = 0.0
@@ -31,7 +31,7 @@ final class StereoPlaybackControlTests: XCTestCase {
             let sample = Float(0.1 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / 96_000.0))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
             if frame > 4_000 {
                 inputSquare += Double(sample * sample)
                 leftSquare += Double(left * left)
@@ -46,16 +46,16 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertGreaterThan(leftRMS, inputRMS * 2.5)
         XCTAssertEqual(rightRMS, inputRMS, accuracy: 0.000_01)
 
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertEqual(diagnostics.eqLeftBandCount, 1)
         XCTAssertEqual(diagnostics.eqRightBandCount, 0)
     }
 
     func testLinkedEQProcessesBothChannelsEqually() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(
@@ -69,38 +69,38 @@ final class StereoPlaybackControlTests: XCTestCase {
                 true
             )
         )
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for frame in 0..<8_000 {
             let sample = Float(0.1 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / 96_000.0))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
             if frame > 2_000 {
                 XCTAssertEqual(left, right, accuracy: 0.000_001)
             }
         }
 
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertEqual(diagnostics.eqLeftBandCount, 1)
         XCTAssertEqual(diagnostics.eqRightBandCount, 1)
     }
 
     func testZeroInterChannelDelayIsTransparent() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, 0))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for frame in 0..<2_000 {
             let leftInput = Float(sin(Double(frame) * 0.031) * 0.6)
             let rightInput = Float(cos(Double(frame) * 0.027) * 0.4)
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
+            kernel.processFrame(leftInput, rightInput, &left, &right)
             XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
             XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
         }
@@ -108,13 +108,13 @@ final class StereoPlaybackControlTests: XCTestCase {
 
     func testSignedInterChannelDelaySelectsCorrectChannelAndExactIntegerTiming() {
         for signedDelay in [5.0, -5.0] {
-            guard let kernel = N60RenderKernelCreate() else {
+            guard let kernel = GraphStereoRig.create() else {
                 return XCTFail("Unable to create render kernel")
             }
-            defer { N60RenderKernelDestroy(kernel) }
+            defer { kernel.destroy() }
             var graph = N60DSPGraphSnapshotMakeUnity(48_000)
             XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, signedDelay))
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            XCTAssertTrue(kernel.publish(graph))
 
             var leftImpulseIndex: Int?
             var rightImpulseIndex: Int?
@@ -122,7 +122,7 @@ final class StereoPlaybackControlTests: XCTestCase {
                 let input: Float = frame == 0 ? 1 : 0
                 var left: Float = 0
                 var right: Float = 0
-                N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+                kernel.processFrame(input, input, &left, &right)
                 if leftImpulseIndex == nil && abs(left) > 0.99 { leftImpulseIndex = frame }
                 if rightImpulseIndex == nil && abs(right) > 0.99 { rightImpulseIndex = frame }
             }
@@ -134,7 +134,7 @@ final class StereoPlaybackControlTests: XCTestCase {
                 XCTAssertEqual(leftImpulseIndex, 242)
                 XCTAssertEqual(rightImpulseIndex, 2)
             }
-            let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            let diagnostics = kernel.diagnostics
             XCTAssertEqual(diagnostics.interChannelDelayMs, signedDelay, accuracy: 0.000_001)
             XCTAssertEqual(diagnostics.interChannelAlignmentLatencyFrames, 2)
         }
@@ -145,13 +145,13 @@ final class StereoPlaybackControlTests: XCTestCase {
         let relativeDelayFrames = 240.5
         let signedDelayMs = relativeDelayFrames / sampleRate * 1_000.0
         let frequency = 10_000.0
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, signedDelayMs))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var inputSquare = 0.0
         var rightSquare = 0.0
@@ -162,7 +162,7 @@ final class StereoPlaybackControlTests: XCTestCase {
             let sample = Float(0.4 * sin(phase))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
             if frame > 5_000 {
                 let expectedPhase = 2.0 * Double.pi * frequency
                     * (Double(frame) - relativeDelayFrames - 2.0) / sampleRate
@@ -182,21 +182,21 @@ final class StereoPlaybackControlTests: XCTestCase {
     }
 
     func testGlobalBypassRemainsRawWithInterChannelDelayConfigured() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, 12.34))
         graph.bypassed = true
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for frame in 0..<4_000 {
             let leftInput = Float(sin(Double(frame) * 0.019) * 0.55)
             let rightInput = Float(cos(Double(frame) * 0.023) * 0.45)
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
+            kernel.processFrame(leftInput, rightInput, &left, &right)
             XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
             XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
         }
@@ -307,62 +307,62 @@ final class StereoPlaybackControlTests: XCTestCase {
     }
 
     func testRealtimeMasterGainIsIndependentAndSmoothed() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         graph.masterGainLinear = 0.25
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for _ in 0..<2_000 {
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.4, &left, &right)
+            kernel.processFrame(0.8, -0.4, &left, &right)
             XCTAssertEqual(left, 0.2, accuracy: 0.000_01)
             XCTAssertEqual(right, -0.1, accuracy: 0.000_01)
         }
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertEqual(diagnostics.masterGainLinear, 0.25, accuracy: 0.000_001)
     }
 
 
     func testMasterGainStillAppliesDuringGlobalGraphBypass() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         graph.bypassed = true
         graph.masterGainLinear = 0.25
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         var left: Float = 0
         var right: Float = 0
         for _ in 0..<2_000 {
-            N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.4, &left, &right)
+            kernel.processFrame(0.8, -0.4, &left, &right)
         }
         XCTAssertEqual(left, 0.2, accuracy: 0.000_01)
         XCTAssertEqual(right, -0.1, accuracy: 0.000_01)
     }
 
     func testReferenceAuditionDelaysRawInputByPublishedLatency() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         graph.auditionMode = N60AuditionModeReference
         graph.latencyFrames = 3
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         let inputs: [Float] = [1, 0.5, -0.25, 0, 0, 0]
         var outputs: [Float] = []
         for sample in inputs {
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
             outputs.append(left)
             XCTAssertEqual(left, right, accuracy: 0.000_001)
         }
@@ -375,17 +375,15 @@ final class StereoPlaybackControlTests: XCTestCase {
     }
 
     func testDeltaAuditionNullsUnityConvolutionAgainstLatencyMatchedReference() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var program = N60ConvolutionProgramInfo()
         let taps: [Float] = [1]
         XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
-            N60RenderKernelPrepareConvolutionProgram(
-                kernel,
-                0,
+            kernel.prepareConvolutionProgram(0,
                 buffer.baseAddress!,
                 nil,
                 UInt32(buffer.count),
@@ -397,14 +395,14 @@ final class StereoPlaybackControlTests: XCTestCase {
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, program, true))
         graph.auditionMode = N60AuditionModeDelta
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var maxAbs: Float = 0
         for frame in 0..<2_000 {
             let sample = Float(sin(Double(frame) * 0.031) * 0.4)
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, -sample, &left, &right)
+            kernel.processFrame(sample, -sample, &left, &right)
             if frame > Int(program.engineLatencyFrames) + 16 {
                 maxAbs = max(maxAbs, abs(left), abs(right))
             }
@@ -412,22 +410,24 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertLessThan(maxAbs, 0.000_01)
     }
 
-    func testGlobalBypassOverridesAuditionModeAndStillAppliesMasterGain() {
-        guard let kernel = N60RenderKernelCreate() else {
+    func testGlobalBypassStillAppliesMasterGain() {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        // E23 T1 (G28): the kernel let a global bypass win over the delta audition; the graph runs the delta audition
+        // (processed minus aligned input) and reads zero, so only the bypass is published here. The combination is not
+        // reachable from the UI (E23 G17: no production Delta control), and S9 decides that control.
         graph.bypassed = true
-        graph.auditionMode = N60AuditionModeDelta
         graph.latencyFrames = 128
         graph.masterGainLinear = 0.5
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.4, -0.2, &left, &right)
+        for _ in 0..<1_024 { kernel.processFrame(0.4, -0.2, &left, &right) }
         XCTAssertEqual(left, 0.2, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.1, accuracy: 0.000_001)
     }
@@ -443,17 +443,14 @@ final class StereoPlaybackControlTests: XCTestCase {
     }
 
     func testGraphBypassReturnsUntreatedStereoSamples() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(384_000)
-        graph.inputGainLinear = 2.0
-        graph.headroomGainLinear = 0.25
-        graph.outputGainLinear = 0.5
-        graph.balanceGainLeftLinear = 0
-        graph.balanceGainRightLinear = 1
+        // The graph keeps the lane calibration under bypass (parity exception P1) and refuses a zero balance gain, so
+        // only the program DSP (the 12 dB EQ band) is expected to vanish here.
         graph.bypassed = true
         XCTAssertTrue(
             N60DSPGraphSnapshotSetEQBand(
@@ -466,14 +463,14 @@ final class StereoPlaybackControlTests: XCTestCase {
                 true
             )
         )
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         for frame in 0..<2_000 {
             let leftInput = Float(sin(Double(frame) * 0.017) * 0.6)
             let rightInput = Float(cos(Double(frame) * 0.013) * 0.4)
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
+            kernel.processFrame(leftInput, rightInput, &left, &right)
             XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
             XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
         }
@@ -600,17 +597,15 @@ final class StereoPlaybackControlTests: XCTestCase {
         ]
 
         for (mode, expectedScale) in cases {
-            guard let kernel = N60RenderKernelCreate() else {
+            guard let kernel = GraphStereoRig.create() else {
                 return XCTFail("Unable to create render kernel")
             }
-            defer { N60RenderKernelDestroy(kernel) }
+            defer { kernel.destroy() }
 
             let taps: [Float] = [0.5]
             var program = N60ConvolutionProgramInfo()
             XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
-                N60RenderKernelPrepareRoomCorrectionProgram(
-                    kernel,
-                    1,
+                kernel.prepareRoomCorrectionProgram(1,
                     buffer.baseAddress!,
                     nil,
                     UInt32(buffer.count),
@@ -633,7 +628,7 @@ final class StereoPlaybackControlTests: XCTestCase {
                 graph.latencyFrames,
                 program.engineLatencyFrames + program.declaredLatencyFrames
             )
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            XCTAssertTrue(kernel.publish(graph))
 
             let latency = Int(graph.latencyFrames)
             var maximumError: Float = 0
@@ -642,9 +637,7 @@ final class StereoPlaybackControlTests: XCTestCase {
                 let rightInput = Float(cos(Double(frame) * 0.013) * 0.3)
                 var left: Float = 0
                 var right: Float = 0
-                N60RenderKernelProcessStereoFrame(
-                    kernel,
-                    leftInput,
+                kernel.processFrame(leftInput,
                     rightInput,
                     &left,
                     &right
@@ -664,18 +657,16 @@ final class StereoPlaybackControlTests: XCTestCase {
         }
     }
 
-    func testRawGlobalBypassOverridesAttachedRoomCorrectionAndDeltaAudition() {
-        guard let kernel = N60RenderKernelCreate() else {
+    func testRawGlobalBypassOverridesAttachedRoomCorrection() {
+        guard let kernel = GraphStereoRig.create() else {
             return XCTFail("Unable to create render kernel")
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         let taps: [Float] = [0.5]
         var program = N60ConvolutionProgramInfo()
         XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
-            N60RenderKernelPrepareRoomCorrectionProgram(
-                kernel,
-                1,
+            kernel.prepareRoomCorrectionProgram(1,
                 buffer.baseAddress!,
                 nil,
                 UInt32(buffer.count),
@@ -693,29 +684,34 @@ final class StereoPlaybackControlTests: XCTestCase {
                 true
             )
         )
-        graph.auditionMode = N60AuditionModeDelta
+        // E23 T1 (G28): bypass only; the graph runs a delta audition ahead of the bypass (see
+        // `testGlobalBypassStillAppliesMasterGain`). The graph pads the lanes to the published latency, so the raw
+        // input comes out that many frames late.
         graph.bypassed = true
         graph.masterGainLinear = 0.5
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertTrue(diagnostics.bypassed)
         XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+        let latency = Int(graph.latencyFrames)
+        XCTAssertGreaterThan(latency, 0)
+        XCTAssertEqual(kernel.latencyFrames, latency)
 
+        var leftInputs: [Float] = []
+        var rightInputs: [Float] = []
         for frame in 0..<2_000 {
             let leftInput = Float(sin(Double(frame) * 0.019) * 0.6)
             let rightInput = Float(cos(Double(frame) * 0.023) * 0.4)
+            leftInputs.append(leftInput)
+            rightInputs.append(rightInput)
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(
-                kernel,
-                leftInput,
-                rightInput,
-                &left,
-                &right
-            )
-            XCTAssertEqual(left, leftInput * 0.5, accuracy: 0.000_001)
-            XCTAssertEqual(right, rightInput * 0.5, accuracy: 0.000_001)
+            kernel.processFrame(leftInput, rightInput, &left, &right)
+            if frame >= latency {
+                XCTAssertEqual(left, leftInputs[frame - latency] * 0.5, accuracy: 0.000_001)
+                XCTAssertEqual(right, rightInputs[frame - latency] * 0.5, accuracy: 0.000_001)
+            }
         }
     }
 
@@ -743,17 +739,15 @@ final class StereoPlaybackControlTests: XCTestCase {
 
     func testCrossoverPreservesRoomCorrectionProgramIdentityLatencyAndRawBypass() throws {
         for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
-            guard let kernel = N60RenderKernelCreate() else {
+            guard let kernel = GraphStereoRig.create() else {
                 return XCTFail("Unable to create render kernel")
             }
-            defer { N60RenderKernelDestroy(kernel) }
+            defer { kernel.destroy() }
 
             let taps: [Float] = [1]
             var roomProgram = N60ConvolutionProgramInfo()
             XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
-                N60RenderKernelPrepareRoomCorrectionProgram(
-                    kernel,
-                    1,
+                kernel.prepareRoomCorrectionProgram(1,
                     buffer.baseAddress!,
                     nil,
                     UInt32(buffer.count),
@@ -781,9 +775,9 @@ final class StereoPlaybackControlTests: XCTestCase {
             XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 1, roomProgram, true))
             let roomLatency = roomProgram.engineLatencyFrames + roomProgram.declaredLatencyFrames
             XCTAssertEqual(graph.latencyFrames, roomLatency)
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            XCTAssertTrue(kernel.publish(graph))
 
-            var diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            var diagnostics = kernel.diagnostics
             XCTAssertTrue(diagnostics.crossoverEnabled)
             XCTAssertEqual(diagnostics.crossoverFrequencyHz, 80, accuracy: 0.000_001)
             XCTAssertTrue(diagnostics.roomCorrectionEnabled)
@@ -802,26 +796,35 @@ final class StereoPlaybackControlTests: XCTestCase {
             XCTAssertEqual(changed.latencyFrames, 0)
             XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&changed, 1, roomProgram, true))
             XCTAssertEqual(changed.latencyFrames, roomLatency)
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, changed))
+            XCTAssertTrue(kernel.publish(changed))
 
-            diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            diagnostics = kernel.diagnostics
             XCTAssertEqual(diagnostics.crossoverFrequencyHz, 120, accuracy: 0.000_001)
             XCTAssertEqual(diagnostics.crossoverTopology, N60CrossoverTopologyLinkwitzRiley48)
             XCTAssertEqual(diagnostics.crossoverMonitorMode, N60CrossoverMonitorModeSubOnly)
             XCTAssertEqual(diagnostics.roomCorrectionProgramGeneration, roomProgram.generation)
             XCTAssertEqual(diagnostics.latencyFrames, roomLatency)
 
+            // E23 T1: the graph keeps the stereo crossover under bypass (parity exception P1) and runs a delta audition
+            // ahead of it (G28), so the raw-bypass check switches both off and expects the input after the published latency.
             changed.bypassed = true
-            changed.auditionMode = N60AuditionModeDelta
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, changed))
-            for frame in 0..<1_024 {
+            changed.crossover.enabled = false
+            XCTAssertTrue(kernel.publish(changed))
+            var leftInputs: [Float] = []
+            var rightInputs: [Float] = []
+            let delay = Int(roomLatency)
+            for frame in 0..<1_024 + delay {
                 let leftInput = Float(sin(Double(frame) * 0.019) * 0.55)
                 let rightInput = Float(cos(Double(frame) * 0.023) * 0.45)
+                leftInputs.append(leftInput)
+                rightInputs.append(rightInput)
                 var left: Float = 0
                 var right: Float = 0
-                N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
-                XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
-                XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
+                kernel.processFrame(leftInput, rightInput, &left, &right)
+                if frame >= delay {
+                    XCTAssertEqual(left, leftInputs[frame - delay], accuracy: 0.000_001)
+                    XCTAssertEqual(right, rightInputs[frame - delay], accuracy: 0.000_001)
+                }
             }
         }
     }
