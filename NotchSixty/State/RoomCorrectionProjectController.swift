@@ -371,6 +371,17 @@ final class RoomCorrectionProjectController: ObservableObject {
     /// E29 S7 (`e29.room-model`): output device, arrangement revision and timing to stamp on a retained position.
     var captureStamp: (() -> RoomCaptureStamp?)?
 
+    /// E29 S7 part 2 (`e29.room-model`): every design reads its positions through the room model, which returns them
+    /// unchanged or refuses (an estimated or stale seat). Nil: positions are used directly.
+    var roomModelGate: ((RoomModelConsumer, [RoomCorrectionMeasurementPosition]) throws -> [RoomCorrectionMeasurementPosition])?
+    /// E29 S7 part 2 (G5): called with each newly retained position, project ID and playback system, to capture its
+    /// paths and impulse responses into `RoomModelStore`. Failure never blocks the retain.
+    var roomModelRecorder: ((RoomCorrectionMeasurementPosition, UUID, UUID) throws -> Void)?
+
+    private func gatedPositions(_ positions: [RoomCorrectionMeasurementPosition]) throws -> [RoomCorrectionMeasurementPosition] {
+        try roomModelGate?(.roomCorrectionDesign, positions) ?? positions
+    }
+
     @discardableResult
     func retainMeasurement(
         _ analysis: RoomCorrectionMeasurementAnalysis,
@@ -419,6 +430,9 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.selectedDesignID = nil
         lastGeneratedTargetReport = nil
         try persistAndPublish(updated)
+        do { try roomModelRecorder?(position, updated.id, systemID) } catch {
+            lastErrorDescription = "Saved the measurement, but not to the room model: \(error)"
+        }
         return position.id
     }
 
@@ -499,7 +513,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         _ = try usableDesignRange(in: updated)
         let report = try IntelligentRoomTargetGenerator().generate(
             aggregate: aggregate,
-            positions: updated.measurements,
+            positions: try gatedPositions(updated.measurements),
             parameters: parameters,
             preference: preference
         )
@@ -548,6 +562,7 @@ final class RoomCorrectionProjectController: ObservableObject {
             throw RoomCorrectionProjectControllerError.aggregateUnavailable
         }
         let usable = try usableDesignRange(in: updated)
+        let designPositions = try gatedPositions(updated.measurements)
         let result = try RoomCorrectionFIRDesigner().design(
             aggregate: aggregate,
             target: target,
@@ -555,7 +570,7 @@ final class RoomCorrectionProjectController: ObservableObject {
             sampleRate: sweep.sampleRate,
             usableLowHz: usable.low,
             usableHighHz: usable.high,
-            sourcePositions: updated.measurements
+            sourcePositions: designPositions
                 .filter { $0.included && $0.weight > 0 }
                 .map { RoomCorrectionDesignSourcePosition(id: $0.id, weight: $0.weight) },
             name: proposedName,
