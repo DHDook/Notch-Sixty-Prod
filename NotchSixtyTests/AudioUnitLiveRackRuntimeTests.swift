@@ -516,87 +516,69 @@ final class AudioUnitLiveRackRuntimeTests: XCTestCase {
         )
     }
 
-    func testStereoPlaybackSystemSplitMatchesLegacyWrapperWithoutRack() {
-        guard let wrapperKernel = N60RenderKernelCreate(),
-              let splitKernel = N60RenderKernelCreate() else {
-            return XCTFail("Unable to allocate stereo render kernels.")
+    /// E23 T1b: replaces `testStereoPlaybackSystemSplitMatchesLegacyWrapperWithoutRack`, which compared the render kernel's
+    /// split playback/system entry points with its one-call wrapper (the kernel against itself, so it is retired with the
+    /// kernel API). Its subject was that the rack seam between the two halves adds nothing. The graph twin: a stereo graph
+    /// with crossfeed and balance and the rack's EXTERNAL stage bound to a gain rack renders the plain graph scaled by the
+    /// rack's gain (the chain after the seam is linear at this level), so the seam is exact at unity and carries the rack's
+    /// audio at 0.5. The rack runs inside the graph (calls counted, no faults).
+    func testStereoGraphRackSeamIsTransparentAtUnityAndCarriesTheRackGain() throws {
+        let process: N60AudioUnitLiveRackProcessFunction = { context, input, output, frames, channels, _ in
+            let gain = context!.assumingMemoryBound(to: Float.self).pointee
+            for i in 0..<Int(frames * channels) { output[i] = input[i] * gain }
+            return true
         }
-        defer {
-            N60RenderKernelDestroy(wrapperKernel)
-            N60RenderKernelDestroy(splitKernel)
+        let block = 512
+        for rate in [44_100.0, 48_000, 96_000, 192_000, 384_000] {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&snapshot, 0.2, true))
+            XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&snapshot, -0.25, true))
+            var forGraph = snapshot
+            let configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &forGraph, sampleRate: rate))
+            let plainSpec = try configuration.makeSpec()
+            let frames = 4 * block
+            let input: [[Float]] = [
+                (0..<frames).map { Float(0.21 * sin(Double($0) * 0.031)) },
+                (0..<frames).map { Float(0.17 * cos(Double($0) * 0.047)) },
+            ]
+            func render(_ host: UnifiedGraphHost) throws -> [[Float]] {
+                var out: [[Float]] = [[], []]
+                for position in stride(from: 0, to: frames, by: block) {
+                    let r = try host.processOffline(input: input.map { Array($0[position..<position + block]) }, frames: block)
+                    out[0] += r[0]; out[1] += r[1]
+                }
+                return out
+            }
+            let plain = try render(try UnifiedGraphHost(spec: plainSpec))
+            XCTAssertGreaterThan(plain[0].map { abs($0) }.max() ?? 0, 0.05, "signal present, rate \(rate)")
+            for gain: Float in [1.0, 0.5] {
+                let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(65_536))
+                let pointer = UnsafeMutablePointer<Float>.allocate(capacity: 1)
+                pointer.pointee = gain
+                defer { pointer.deallocate() }
+                let processor = N60AudioUnitLiveRackProcessor(
+                    context: UnsafeMutableRawPointer(pointer), process: process, faultLatch: nil,
+                    channelCount: 2, maximumFramesPerSlice: UInt32(block), latencyFrames: 0)
+                XCTAssertTrue(N60RealtimeAudioBridgeConfigureAudioUnitRack(bridge, processor))
+                let host = try UnifiedGraphHost(spec: plainSpec.insertingExternalRackStage(latencyFrames: 0))
+                let raw = try XCTUnwrap(host.rawGraph)
+                XCTAssertTrue(N60RealtimeAudioBridgeBindRackToGraph(bridge, raw))
+                defer {
+                    N60RealtimeAudioBridgeUnbindRackFromGraph(bridge, raw)
+                    N60RealtimeAudioBridgeDestroy(bridge)
+                }
+                let racked = try render(host)
+                var calls: UInt64 = 0, faults: UInt64 = 0
+                n60_graph_external_stats(OpaquePointer(raw), &calls, &faults)
+                XCTAssertGreaterThan(calls, 0, "the rack ran inside the graph, rate \(rate) gain \(gain)")
+                XCTAssertEqual(faults, 0, "rate \(rate) gain \(gain)")
+                for lane in 0..<2 {
+                    var worst: Float = 0
+                    for (a, b) in zip(plain[lane], racked[lane]) { worst = max(worst, abs(a * gain - b)) }
+                    XCTAssertLessThan(worst, 1e-5, "rack seam, lane \(lane) rate \(rate) gain \(gain)")
+                }
+            }
         }
-
-        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
-        XCTAssertTrue(
-            N60DSPGraphSnapshotSetSpeakerCrossfeed(
-                &graph,
-                0.2,
-                true
-            )
-        )
-        XCTAssertTrue(
-            N60DSPGraphSnapshotSetSymmetryBalance(
-                &graph,
-                -0.25,
-                true
-            )
-        )
-        XCTAssertTrue(
-            N60RenderKernelPublishSnapshot(wrapperKernel, graph)
-        )
-        XCTAssertTrue(
-            N60RenderKernelPublishSnapshot(splitKernel, graph)
-        )
-
-        var splitContext =
-            N60RenderKernelBeginRender(splitKernel)
-        let totalFrames: UInt32 = 2_048
-        for frame in 0..<totalFrames {
-            let left = Float(
-                0.21 * sin(Double(frame) * 0.031)
-            )
-            let right = Float(
-                0.17 * cos(Double(frame) * 0.047)
-            )
-
-            var wrapperLeft: Float = 0
-            var wrapperRight: Float = 0
-            N60RenderKernelProcessStereoFrame(
-                wrapperKernel,
-                left,
-                right,
-                &wrapperLeft,
-                &wrapperRight
-            )
-
-            var playback = N60StereoPlaybackFrame()
-            N60RenderKernelProcessStereoPlaybackFrameInContext(
-                splitKernel,
-                &splitContext,
-                left,
-                right,
-                &playback
-            )
-            var splitLeft: Float = 0
-            var splitRight: Float = 0
-            N60RenderKernelProcessStereoSystemFrameInContext(
-                splitKernel,
-                &splitContext,
-                &playback,
-                playback.left,
-                playback.right,
-                &splitLeft,
-                &splitRight
-            )
-
-            XCTAssertEqual(splitLeft, wrapperLeft, accuracy: 0.000_001)
-            XCTAssertEqual(splitRight, wrapperRight, accuracy: 0.000_001)
-        }
-        N60RenderKernelEndRender(
-            splitKernel,
-            &splitContext,
-            totalFrames
-        )
     }
 }
 

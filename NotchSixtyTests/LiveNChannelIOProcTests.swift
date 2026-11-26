@@ -4,8 +4,19 @@ import XCTest
 
 /// Drives the live N-channel capture and output IOProcs with synthetic buffer
 /// lists: semantic input reorder -> lanes -> physical map, at matched rates and
-/// through the adaptive SRC.
+/// through the adaptive SRC. Since E23 T1b (G21) the bridge renders through the unified graph, the way a live session
+/// hosts it (`UnifiedGraphTranslator.nChannelConfiguration`, `N60LiveNChannelBridgeAttachGraph`), not through the legacy
+/// N-channel render core.
 final class LiveNChannelIOProcTests: XCTestCase {
+    /// Graph hosts the bridges render through; the bridge never owns the graph, so each test's bridge is destroyed
+    /// (its `defer`) before `tearDown` releases the host.
+    private var hosts: [UnifiedGraphHost] = []
+
+    override func tearDown() {
+        hosts = []
+        super.tearDown()
+    }
+
     private static let standardSampleRates: [Double] = [
         44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000
     ]
@@ -160,9 +171,19 @@ final class LiveNChannelIOProcTests: XCTestCase {
             N60ProgramInputMapCompile($0.baseAddress!, UInt32($0.count), graph.programLayout, &inputMap)
         }
         XCTAssertTrue(mapped)
-        return try XCTUnwrap(
+        let bridge = try XCTUnwrap(
             N60LiveNChannelBridgeCreate(Self.capacityFrames, inputMap, graph, gateFrames, 1)
         )
+        var configuration = try XCTUnwrap(UnifiedGraphTranslator.nChannelConfiguration(
+            routePlan: plan, sampleRate: sampleRate, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(enabled: false)
+        ), "the 5.1 plan must render on the graph at \(sampleRate) Hz")
+        configuration.maxBlockFrames = 4_096
+        let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        XCTAssertTrue(N60LiveNChannelBridgeAttachGraph(
+            bridge, try XCTUnwrap(host.rawGraph), UInt32(configuration.channelCount), configuration.maxBlockFrames))
+        hosts.append(host)
+        return bridge
     }
 
     private func capture(
