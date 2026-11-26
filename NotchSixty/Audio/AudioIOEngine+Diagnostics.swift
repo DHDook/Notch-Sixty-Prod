@@ -202,11 +202,7 @@ extension AudioIOEngine {
                 } ?? binauralHeadphoneTransportSession.map {
                     $0.programLayout.roles.count
                 } ?? 2,
-                fallbackReason: unifiedGraphEnabled
-                    ? (transportSession?.unifiedGraphFallbackReason
-                        ?? nChannelTransportSession?.unifiedGraphFallbackReason
-                        ?? binauralHeadphoneTransportSession?.unifiedGraphFallbackReason)
-                    : nil,
+                fallbackReason: transportSession?.unifiedGraphFallbackReason,
                 stereoFinalReading: stereoFinalReading,
                 stereoDynamicsReading: stereoDynamicsReading
             )

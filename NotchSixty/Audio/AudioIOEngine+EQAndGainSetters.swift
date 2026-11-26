@@ -534,9 +534,8 @@ extension AudioIOEngine {
         }
         if lifecycle.state != .idle {
             let context = HeadphoneLiveEditPlanner.Context(
-                unifiedGraphEnabled: unifiedGraphEnabled,
                 lifecycleRunning: lifecycle.state == .running,
-                binauralSession: binauralHeadphoneTransportSession.map { $0.unifiedGraphActive ? .graph : .legacy } ?? .none,
+                binauralSession: binauralHeadphoneTransportSession.map { _ in .graph } ?? .none,
                 nChannelSessionActive: nChannelTransportSession != nil,
                 stereoHeadphoneGraphActive: transportSession?.headphoneGraphActive == true)
             switch HeadphoneLiveEditPlanner.plan(from: headphoneDeviceProfileConfiguration, to: configuration, context: context) {
@@ -600,7 +599,6 @@ extension AudioIOEngine {
             try session.applyStereoAlignment(alignment)
         } else if let alignment {
             if let issue = alignment.issue { throw issue }
-            if !unifiedGraphEnabled, let refusal = alignment.legacyKernelRefusal { throw refusal }
         }
         commitStereoAlignment(alignment)
         setLastError(nil)

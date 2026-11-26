@@ -194,8 +194,8 @@ struct MonoBassFilter: Codable, Equatable, Sendable {
     var order: Int { slopeDBPerOctave / 6 }
     var isValid: Bool { Self.slopes.contains(slopeDBPerOctave) }
 
-    /// The legacy kernel runs Linkwitz-Riley 24 and 48 only.
-    var legacyKernelCanRun: Bool { family == .linkwitzRiley && (slopeDBPerOctave == 24 || slopeDBPerOctave == 48) }
+    /// Linkwitz-Riley 24 or 48: the filter a stereo session uses when no mono-bass filter is set.
+    var isStandardFilter: Bool { family == .linkwitzRiley && (slopeDBPerOctave == 24 || slopeDBPerOctave == 48) }
 
     /// Linkwitz-Riley orders 2 and 6 (12 and 36 dB per octave) sum flat only when the low-pass path is inverted.
     /// Butterworth and Bessel are not flat at the corner by design, and need no correction.
@@ -229,7 +229,7 @@ struct StereoBassAlignment: Codable, Equatable, Sendable {
     var right = SpeakerFeedCalibration()
 
     var isStandard: Bool {
-        (monoBassFilter ?? .standard).legacyKernelCanRun && left.isIdentity && right.isIdentity
+        (monoBassFilter ?? .standard).isStandardFilter && left.isIdentity && right.isIdentity
     }
 
     /// Why this cannot run, or nil. Checked before the alignment reaches the engine.
@@ -239,19 +239,11 @@ struct StereoBassAlignment: Codable, Equatable, Sendable {
         return nil
     }
 
-    /// The legacy kernel (`e6.legacy-kernel`) cannot run this alignment; nil when it can.
-    var legacyKernelRefusal: StereoBassAlignmentIssue? {
-        if let monoBassFilter, !monoBassFilter.legacyKernelCanRun { return .legacyKernelFilter }
-        if !left.isIdentity || !right.isIdentity { return .legacyKernelCalibration }
-        return nil
-    }
 }
 
 enum StereoBassAlignmentIssue: Error, Equatable, Sendable, LocalizedError {
     case invalidSlope(Int)
     case calibrationOutOfRange
-    case legacyKernelFilter
-    case legacyKernelCalibration
 
     var errorDescription: String? {
         switch self {
@@ -259,10 +251,6 @@ enum StereoBassAlignmentIssue: Error, Equatable, Sendable, LocalizedError {
             return "A mono-bass slope of \(slope) dB per octave is not supported; use 12, 24, 36 or 48."
         case .calibrationOutOfRange:
             return "Speaker trim must be within 20 dB and delay within 0 to 50 ms."
-        case .legacyKernelFilter:
-            return "This mono-bass filter needs the unified graph; the legacy kernel (e6.legacy-kernel) runs Linkwitz-Riley 24 and 48 dB per octave only."
-        case .legacyKernelCalibration:
-            return "Speaker trim, delay and polarity need the unified graph; the legacy kernel (e6.legacy-kernel) does not apply them."
         }
     }
 }

@@ -6,10 +6,9 @@ enum LimiterAutoRelease {
     /// Bit value in the PROTECTION stage's trailing word (ABI v46).
     static let wordBit: Float = 4
 
-    /// Whether the control is offered and honoured: the page flag is on and the frozen kernel is not selected (it keeps its
-    /// fixed release).
+    /// Whether the control is offered and honoured: the page flag is on.
     nonisolated static var isAvailable: Bool {
-        FeatureFlags.isEnabledProcessWide(.eqPageEnhancements) && !FeatureFlags.isEnabledProcessWide(.legacyKernel)
+        FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)
     }
 
     /// The Release row's text while Auto Release is on: "Auto" with the current effective time once the engine reports one.

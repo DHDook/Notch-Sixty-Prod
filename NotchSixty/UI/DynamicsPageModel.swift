@@ -189,13 +189,3 @@ extension DynamicsParameterSpec {
         return "field: \(text)"
     }
 }
-
-/// E33 G21: the frozen kernel (the "legacy kernel" flag, or the fallback when the graph cannot be built) renders three
-/// multiband bands whatever the page asks for, so the page says so rather than show a band count that is not heard.
-enum MultibandKernelNote {
-    static let text = "The legacy audio kernel is rendering: it plays three multiband bands, split at the first two crossovers, whatever the band count."
-
-    static func note(bandCount: Int, graphRendering: Bool) -> String? {
-        bandCount > 3 && !graphRendering ? text : nil
-    }
-}

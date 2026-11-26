@@ -88,12 +88,10 @@ final class E33PageGapTests: XCTestCase {
         // (NOTCHSIXTY_GRADUATED_FLAGS_OFF, off wins over setEnabled) the whole Extras section is absent by design (G13b).
         guard flags.isEnabled(.dynamicsExtras), flags.isEnabled(.eqPageEnhancements) else {
             let flagsOff = AudioIOEngine()
-            flagsOff.unifiedGraphEnabled = true
             XCTAssertNil(dynamics(.expander, flagsOff).field("Lookahead"), "with the graduated flags off the expander has no Lookahead row")
             return
         }
         let engine = AudioIOEngine()
-        engine.unifiedGraphEnabled = true
         let on = dynamics(.expander, engine)
         let field = try XCTUnwrap(on.field("Lookahead"), "Lookahead row with the flag on")
         XCTAssertFalse(field.isEnabled, "the time is unavailable while lookahead is off")
@@ -103,10 +101,6 @@ final class E33PageGapTests: XCTestCase {
         XCTAssertTrue(live.setText("8", inField: "Lookahead"))
         XCTAssertEqual(engine.dynamicsConfiguration.expander.lookaheadTimeMs, 8, accuracy: 1e-9)
 
-        engine.unifiedGraphEnabled = false
-        XCTAssertFalse(try XCTUnwrap(dynamics(.expander, engine).field("Lookahead")).isEnabled, "the frozen kernel has no extras")
-
-        engine.unifiedGraphEnabled = true
         flags.setEnabled(false, for: .eqPageEnhancements)
         XCTAssertNil(dynamics(.expander, engine).field("Lookahead"), "the flag-off expander has no Lookahead row")
     }

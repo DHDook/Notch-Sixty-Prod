@@ -31,7 +31,7 @@ extension FeatureFlag {
     /// the flag graduates (`graduated: true`, default on); the flag-cleanup phase after E22 deletes it and the checks
     /// that read it. See `docs/FEATURE_FLAGS.md` for the registry.
     static let all: [FeatureFlag] = [
-        .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
+        .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
@@ -41,15 +41,6 @@ extension FeatureFlag {
         .activeCommissioning, .settingsPage, .automation, .localAPI,
         .simpleExpertModes
     ]
-
-    /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
-    /// `N60RenderKernel` fallback instead (no new features). Swift decides; the engine never reads
-    /// flags. E23 deletes the kernel and this flag.
-    static let legacyKernel = FeatureFlag(
-        id: "e6.legacy-kernel",
-        title: "Legacy render kernel (frozen fallback)",
-        epic: "E6"
-    )
 
     /// E4 S14: the control plane renews a dead-man lease on the live anti-noise; the render path
     /// fades it out if the lease lapses. Off: no lease is enforced. Removed when E4 ships.

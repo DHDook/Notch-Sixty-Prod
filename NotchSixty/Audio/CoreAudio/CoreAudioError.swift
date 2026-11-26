@@ -443,9 +443,6 @@ final class CoreAudioTransportSession {
     }
 
     private var bridge: OpaquePointer?
-    /// E6 S8: when true, each published stereo snapshot the core can reproduce is also
-    /// rendered through a libn60core graph; anything else keeps the kernel path.
-    var unifiedGraphEnabled = false
     /// E4 S30c: the conversation-unmasking cuts (17 positive dB values, `AmbientUnmaskOverlay`) that ride on this
     /// session's AMBIENT stage as the section trailer (graph ABI v32). Set by the engine before it publishes; read
     /// under `graphRefreshLock` when the graph is built. nil leaves the plain stage. A new session starts with nil,
@@ -492,19 +489,21 @@ final class CoreAudioTransportSession {
     /// hold (up to 32768 taps, 262144 with e9.long-fir) are kept, newest few per convolver (the kernel has three slots).
     private var retainedPrograms: [UnifiedGraphProgramKind: [UInt64: UnifiedGraphFIRProgram]] = [:]
     private let retainedProgramsLock = NSLock()
-    /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
+    /// E23 K1: why the graph cannot render this session: the refusal that left no graph attached (the start fails with
+    /// it); nil while a graph renders. A refused live edit leaves the running graph as it was and sets only
+    /// `lastGraphRefusal`.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
-    /// E4 S30d (G14): whether the unified graph renders this session now (enabled and no fallback to the kernel), read
-    /// under `graphRefreshLock`, which is held while a refresh sets or clears the fallback reason.
+    /// The reason of the most recent refusal, for the error the refused edit throws.
+    private(set) var lastGraphRefusal: UnifiedGraphFallbackReason?
+    /// E4 S30d (G14): whether the unified graph renders this session now, read under `graphRefreshLock`, which is held
+    /// while a refresh sets or clears the fallback reason.
     var unifiedGraphRendersLocked: Bool {
         graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
-        return unifiedGraphEnabled && unifiedGraphFallbackReason == nil
+        return unifiedGraphFallbackReason == nil
     }
     private var headphoneDSPConfigured = false
-    /// E6 S9d: the profile the HEADPHONE stage renders (nil without a stereo headphone profile) and the one the
-    /// kernel was configured with. They differ after a live edit; the kernel cannot be reconfigured while IO runs.
+    /// E6 S9d: the profile the HEADPHONE stage renders (nil without a stereo headphone profile).
     private var headphoneProfile: HeadphoneDeviceProfileConfiguration?
-    private var kernelHeadphoneProfile: HeadphoneDeviceProfileConfiguration?
     private var lastGraphSnapshot: N60DSPGraphSnapshot?
     /// E25 S2: the mono-bass filter and speaker feed calibration compiled into the stereo graph. nil is the standard
     /// session.
@@ -1431,10 +1430,6 @@ final class CoreAudioTransportSession {
         }
         headphoneDSPConfigured = snapshot != nil
         headphoneProfile = snapshot != nil ? profile : nil
-        kernelHeadphoneProfile = headphoneProfile
-        // IO is stopped here, so the callback cannot be mid-hand-over; the next publish
-        // re-evaluates eligibility, and until then the kernel (which has the headphone DSP) renders.
-        if headphoneDSPConfigured { detachUnifiedGraph() }
     }
 
     /// E12 S4a: the generator stage the next graph build includes (nil for normal playback). Session-scoped, so a
@@ -1448,11 +1443,10 @@ final class CoreAudioTransportSession {
         guard let settings else {
             guard liveGenerator != nil else { return }
             liveGenerator = nil
-            // A refusal here hands rendering to the kernel, which has no generator, so the noise stops either way.
             if let snapshot = lastGraphSnapshot { refreshUnifiedGraph(for: snapshot) }
             return
         }
-        guard unifiedGraphEnabled, unifiedGraphActive, let snapshot = lastGraphSnapshot,
+        guard unifiedGraphActive, let snapshot = lastGraphSnapshot,
               let params = settings.stageParams(active: true, sampleRate: outputFormat.sampleRate) else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
@@ -1461,7 +1455,7 @@ final class CoreAudioTransportSession {
             // The refusal already cleared the stage; rebuild the graph without it so rendering returns to the graph.
             liveGenerator = nil
             if let snapshot = lastGraphSnapshot { refreshUnifiedGraph(for: snapshot) }
-            throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphFallbackReason ?? .specRejected)
+            throw LiveNChannelTransportError.unifiedGraphRejected(lastGraphRefusal ?? .specRejected)
         }
     }
 
@@ -1476,7 +1470,6 @@ final class CoreAudioTransportSession {
 
     /// True when the kernel's headphone stage holds an older profile than the graph (after a live edit), so a
     /// fall-back to the kernel would render the wrong correction.
-    private var kernelHeadphoneStale: Bool { headphoneProfile != kernelHeadphoneProfile }
 
     /// E6 S9d. Control thread. A live headphone profile edit on a graph-rendered stereo session: the HEADPHONE and
     /// ear delay stages are rebuilt from `profile` and applied as posted parameters (or a faded rebuild). Any
@@ -1487,7 +1480,7 @@ final class CoreAudioTransportSession {
         }
         // Stored state changes only once the graph accepted the profile.
         if !refreshUnifiedGraph(for: snapshot, headphone: profile) {
-            throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphFallbackReason ?? .specRejected)
+            throw LiveNChannelTransportError.unifiedGraphRejected(lastGraphRefusal ?? .specRejected)
         }
     }
 
@@ -1519,7 +1512,7 @@ final class CoreAudioTransportSession {
     }
 
     private func republishForAnalyserTaps() {
-        guard unifiedGraphEnabled, let snapshot = lastGraphSnapshot else { return }
+        guard let snapshot = lastGraphSnapshot else { return }
         let previous = linearFadeForEQRepublish
         linearFadeForEQRepublish = true
         defer { linearFadeForEQRepublish = previous }
@@ -1550,14 +1543,13 @@ final class CoreAudioTransportSession {
     func applyStereoAlignment(_ alignment: StereoBassAlignment?) throws {
         if let alignment {
             if let issue = alignment.issue { throw issue }
-            if !unifiedGraphEnabled, let refusal = alignment.legacyKernelRefusal { throw refusal }
         }
         let previous = stereoAlignment
         stereoAlignment = alignment
-        guard unifiedGraphEnabled, let snapshot = lastGraphSnapshot else { return }
+        guard let snapshot = lastGraphSnapshot else { return }
         if !refreshUnifiedGraph(for: snapshot) {
             stereoAlignment = previous
-            throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphFallbackReason ?? .specRejected)
+            throw LiveNChannelTransportError.unifiedGraphRejected(lastGraphRefusal ?? .specRejected)
         }
     }
 
@@ -1574,27 +1566,14 @@ final class CoreAudioTransportSession {
         guard let bridge else { return false }
         lastGraphSnapshot = snapshot
         unifiedGraphFallbackReason = nil
-        // A refusal normally hands rendering to the kernel. After a live headphone edit the kernel holds the older
-        // correction, so the running graph stays instead and the caller sees the refusal (E6 S9d).
+        lastGraphRefusal = nil
         let profile = candidate ?? headphoneProfile
-        // E7 S1: an ear delay past the kernel's 4,095 frames renders on the graph only, so the kernel is wrong for it too.
-        let kernelDelayClamped = headphoneDSPConfigured && profile?.kernelRendersDelays(sampleRate: snapshot.sampleRate) == false
-        let kernelWouldBeWrong = kernelHeadphoneStale || kernelDelayClamped
-            || (headphoneDSPConfigured && profile != kernelHeadphoneProfile)
+        // E23 K1: there is no kernel to fall back to. A refusal leaves a running graph as it was (the edit is rejected
+        // and the caller throws the reason); with no graph attached the start fails with the reason.
         func refuse(_ reason: UnifiedGraphFallbackReason) -> Bool {
-            // The kernel plays the anti-noise from here (its own snapshot copy), so the feed goes silent first.
-            silenceHostedQuietZoneFeed()
-            unifiedGraphFallbackReason = reason
-            // The kernel never plays the generator, so a refusal ends the noise instead of leaving stale state.
-            liveGenerator = nil
-            if !(kernelWouldBeWrong && N60RealtimeAudioBridgeUnifiedGraphActive(bridge)) { detachUnifiedGraph() }
+            lastGraphRefusal = reason
+            if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) { unifiedGraphFallbackReason = reason }
             return false
-        }
-        guard unifiedGraphEnabled else {
-            if kernelWouldBeWrong { return false }
-            silenceHostedQuietZoneFeed()
-            detachUnifiedGraph()
-            return true
         }
         // E6 S8e: same-device, aggregate and AU rack routes render through the graph too (the rack as its
         // EXTERNAL stage, the speaker-bus split in the bridge). A stereo headphone profile is the HEADPHONE stage
@@ -1806,21 +1785,13 @@ final class CoreAudioTransportSession {
         refreshUnifiedGraph(for: snapshot)
     }
 
-    private func detachUnifiedGraph() {
-        unifiedGraphLaneTapFrames = 0
-        if let bridge, N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
-            N60RealtimeAudioBridgeSetUnifiedGraphAncLive(bridge, false)
-            _ = N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0, 0)
-        }
-    }
-
 
     func publishDSPGraph(_ original: N60DSPGraphSnapshot) throws {
         let signpost = AppSignposts.signposter.beginInterval("publishDSPGraph")
         defer { AppSignposts.signposter.endInterval("publishDSPGraph", signpost) }
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
-        if !refreshUnifiedGraph(for: original), kernelHeadphoneStale {
-            throw CoreAudioTransportError.dspGraphPublicationFailed
+        if !refreshUnifiedGraph(for: original) {
+            throw LiveNChannelTransportError.unifiedGraphRejected(lastGraphRefusal ?? .specRejected)
         }
         // The kernel never plays a Quiet Zone the graph renders.
         let snapshot = snapshotForKernel(original)
@@ -1853,8 +1824,8 @@ final class CoreAudioTransportSession {
 
     func transitionDSPGraph(_ original: N60DSPGraphSnapshot) throws {
         guard bridge != nil else { throw CoreAudioTransportError.dspGraphPublicationFailed }
-        if !refreshUnifiedGraph(for: original), kernelHeadphoneStale {
-            throw CoreAudioTransportError.dspGraphPublicationFailed
+        if !refreshUnifiedGraph(for: original) {
+            throw LiveNChannelTransportError.unifiedGraphRejected(lastGraphRefusal ?? .specRejected)
         }
         let snapshot = snapshotForKernel(original)
 

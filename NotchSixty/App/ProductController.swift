@@ -137,9 +137,6 @@ final class ProductController: ObservableObject {
             ),
             masterVolumeStore: UserDefaultsMasterVolumeStore()
         )
-        // E6 S11: the graph is the default; `e6.legacy-kernel` selects the frozen kernel fallback.
-        // Swift decides; the engine only receives the result. Read once at launch.
-        audioEngine.unifiedGraphEnabled = !FeatureFlags().isEnabled(.legacyKernel)
         // E4 S32: the live-output flags are decided in one place so a test drives the production configuration.
         let adaptiveTonalLive = QuietZoneFlagWiring.configureEngine(audioEngine, flags: FeatureFlags())
         let audioUnitHost = AudioUnitHostController()

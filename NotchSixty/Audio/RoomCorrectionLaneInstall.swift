@@ -113,7 +113,6 @@ enum RoomCorrectionLaneInstallError: Error, Equatable, LocalizedError {
 enum RoomCorrectionInactiveReason: Equatable, Sendable {
     case needsSpeakerProfile
     case layoutChanged
-    case needsUnifiedGraph
     case synthesisFailed(rate: Double)
 
     var message: String {
@@ -122,8 +121,6 @@ enum RoomCorrectionInactiveReason: Equatable, Sendable {
             return "This correction was measured for your speaker profile. Turn the profile on to use it."
         case .layoutChanged:
             return "The speaker layout changed since this correction was measured. Measure and correct again."
-        case .needsUnifiedGraph:
-            return "This correction needs the unified graph renderer, which is off."
         case .synthesisFailed(let rate):
             return "The correction filters could not be built for \(Int(rate.rounded())) Hz, so playback is uncorrected."
         }

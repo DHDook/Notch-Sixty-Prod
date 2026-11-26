@@ -987,7 +987,7 @@ final class SystemSetupFlowModel: ObservableObject, SpeakerArrangementEditing {
     /// The lane layout of the enabled profile on the selected output, or nil on the filter path (legacy kernel, no profile).
     private func laneLayout(profile: OutputDeviceProfileConfiguration) throws
         -> (shape: UnifiedGraphLayoutShape, subs: Int)? {
-        guard engine.unifiedGraphEnabled, profile.enabled, let output = engine.selectedOutputDevice else { return nil }
+        guard profile.enabled, let output = engine.selectedOutputDevice else { return nil }
         let routePlan = try profile.makeLivePlan(
             availableDevices: engine.outputDevices, sampleRate: output.nominalSampleRate,
             selectedOutputUID: output.uid, bassManagementEnabled: engine.bassManagementConfiguration.enabled)
@@ -1101,7 +1101,7 @@ final class SystemSetupFlowModel: ObservableObject, SpeakerArrangementEditing {
 
     /// The lane-plan form of the correction, or nil when the filter path applies (legacy kernel, no enabled profile).
     private func makeLaneInstall(forceMode: RoomCorrectionLatencyMode? = nil) async throws -> RoomCorrectionLaneInstall? {
-        guard engine.unifiedGraphEnabled, let rate = flow.choices.sampleRate,
+        guard let rate = flow.choices.sampleRate,
               let profile = profiles.selectedSystemOutputDeviceProfile, profile.enabled,
               let output = engine.selectedOutputDevice else { return nil }
         let routePlan = try profile.makeLivePlan(

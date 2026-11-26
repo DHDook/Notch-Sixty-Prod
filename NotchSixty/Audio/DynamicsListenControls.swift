@@ -4,18 +4,16 @@ import Foundation
 /// reads this state, it reads the parameters the host posts.
 extension AudioIOEngine {
     /// Makes `listener` the only listener (nil stops). Throws, leaving the state unchanged, when nothing renders or the
-    /// stage has no listen slot (flag off, or the frozen kernel renders).
+    /// stage has no listen slot (flag off).
     func setDynamicsListener(_ listener: DynamicsListener?) throws {
         guard listener == nil || FeatureFlags().isEnabled(.dynamicsExtras) else {
             throw DynamicsExtrasError.flagOff
         }
         guard let host = dynamicsListenHost else {
             if listener == nil { setDynamicsListenerMirror(nil, solo: dynamicsSoloBands); return }
-            throw dynamicsKernelRenders && dynamicsHasStereoSession ? DynamicsExtrasError.kernelRenders : DynamicsExtrasError.notRunning
+            throw DynamicsExtrasError.notRunning
         }
-        do { try host.setListener(listener) } catch {
-            throw dynamicsKernelRenders ? DynamicsExtrasError.kernelRenders : error
-        }
+        try host.setListener(listener)
         setDynamicsListenerMirror(host.listenSession.listener, solo: host.listenSession.soloBands)
     }
 
@@ -24,11 +22,9 @@ extension AudioIOEngine {
         guard bands.isEmpty || FeatureFlags().isEnabled(.dynamicsExtras) else { throw DynamicsExtrasError.flagOff }
         guard let host = dynamicsListenHost else {
             if bands.isEmpty { setDynamicsListenerMirror(dynamicsListener, solo: []); return }
-            throw dynamicsKernelRenders && dynamicsHasStereoSession ? DynamicsExtrasError.kernelRenders : DynamicsExtrasError.notRunning
+            throw DynamicsExtrasError.notRunning
         }
-        do { try host.setSoloBands(bands) } catch {
-            throw dynamicsKernelRenders ? DynamicsExtrasError.kernelRenders : error
-        }
+        try host.setSoloBands(bands)
         setDynamicsListenerMirror(host.listenSession.listener, solo: host.listenSession.soloBands)
     }
 
@@ -58,42 +54,36 @@ extension AudioIOEngine {
 
 enum DynamicsExtrasError: LocalizedError, Equatable {
     case flagOff
-    case kernelRenders
     case notRunning
 
     var errorDescription: String? {
         switch self {
         case .flagOff: return "Dynamics extras are turned off."
-        case .kernelRenders: return DynamicsExtrasAvailability.kernelReason
         case .notRunning: return "Start processing to listen or solo."
         }
     }
 }
 
 /// E28 S7d (G8): whether the S7 extras can play, and the reason shown beside a disabled control. Pure; the page feeds it the
-/// flag and the engine's renderer state. Multiband bypass is the one extra the kernel also renders (ratio 1, makeup 0).
+/// flag and the engine's renderer state.
 struct DynamicsExtrasAvailability: Equatable {
-    static let kernelReason = "Not available while the legacy kernel renders; it plays only on the unified graph."
     static let notRunningReason = "Start processing to listen or solo."
 
     var flagOn: Bool
-    var kernelRenders: Bool
     var running: Bool
 
-    /// Rows and toggles that change the sound: usable when the flag is on and the graph (not the kernel) renders.
-    var extrasEnabled: Bool { flagOn && !kernelRenders }
-    var extrasDisabledReason: String? { !flagOn ? nil : (kernelRenders ? Self.kernelReason : nil) }
+    /// Rows and toggles that change the sound: usable when the flag is on.
+    var extrasEnabled: Bool { flagOn }
+    var extrasDisabledReason: String? { nil }
 
     /// Listen and solo also need something running.
     var listenEnabled: Bool { extrasEnabled && running }
     var listenDisabledReason: String? {
         guard flagOn else { return nil }
-        if kernelRenders { return Self.kernelReason }
         return running ? nil : Self.notRunningReason
     }
 
-    /// Per-band bypass works on both paths.
-    var bypassEnabled: Bool { flagOn }
+        var bypassEnabled: Bool { flagOn }
 
     /// "adds X ms" for a lookahead of `ms` at `sampleRate`: the frames the core rounds to, over the rate.
     static func addsText(ms: Double, sampleRate: Double?) -> String {

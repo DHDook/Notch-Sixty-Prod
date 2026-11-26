@@ -52,7 +52,6 @@ enum ProfileQuietZoneFixture {
         let engine = AudioIOEngine(deviceCatalog: Catalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: output.uid)
-        engine.unifiedGraphEnabled = true
         try engine.replaceBassManagementConfiguration(bass)
         var gain = DSPGainConfiguration()
         gain.headroomAttenuationDB = -12  // the planner reserves anti-noise headroom from this

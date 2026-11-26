@@ -12,7 +12,6 @@ struct ProductionEQGainBar: View {
     @State private var monitor = EQClipMonitor()
     @State private var clipTripped = false
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
-    private let overRangeIsDelta = !FeatureFlags().isEnabled(.legacyKernel)
 
     private var badge: EQHeadroomBadge {
         EQHeadroomBadge.evaluate(
@@ -202,7 +201,7 @@ struct ProductionEQGainBar: View {
                 monitor.ingest(
                     peakLinear: max(post.peakLeft, post.peakRight),
                     overRangeSamples: post.overRangeSamples,
-                    overRangeIsDelta: overRangeIsDelta,
+                    overRangeIsDelta: true,
                     at: now
                 )
             } else {

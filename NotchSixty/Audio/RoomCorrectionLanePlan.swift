@@ -6,7 +6,7 @@ import Foundation
 // activated, and whenever the device rate changes, taps are synthesised for that rate here, on a
 // control or worker thread, cached per rate, and handed to the graph as an immutable plan that is
 // published through the normal snapshot path. Nothing here runs on an audio thread and the engine
-// never reads the feature flag: the caller passes `unifiedGraphEnabled`.
+// never reads a feature flag.
 //
 // Allocation: every call allocates (offline). Synchronisation: the cache holds one lock around
 // dictionary access only; synthesis runs outside it. Latency: every lane of a plan reports one
@@ -78,7 +78,6 @@ struct RoomCorrectionLanePlan: Equatable, Sendable {
 }
 
 enum RoomCorrectionLanePlanError: Error, Equatable, LocalizedError {
-    case legacyKernel
     case noLanes
     case laneOutOfRange(Int)
     case duplicateLane(Int)
@@ -86,8 +85,6 @@ enum RoomCorrectionLanePlanError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .legacyKernel:
-            return "Mixed-phase and multichannel room correction need the unified graph; the legacy kernel (e6.legacy-kernel) runs stereo minimum-phase correction only."
         case .noLanes:
             return "The design has no corrected lanes."
         case .laneOutOfRange(let lane):
@@ -123,12 +120,10 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
     private static func rateKey(_ rate: Double) -> Int { Int((rate * 10).rounded()) }
 
     /// The plan for `rate`, from the cache when this design has been synthesised at that rate before.
-    /// Throws `.legacyKernel` (with a user-facing reason) when `unifiedGraphEnabled` is false.
     func plan(
-        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double, unifiedGraphEnabled: Bool = true,
+        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double,
         firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) throws -> RoomCorrectionLanePlan {
-        guard unifiedGraphEnabled else { throw RoomCorrectionLanePlanError.legacyKernel }
         guard !design.lanes.isEmpty else { throw RoomCorrectionLanePlanError.noLanes }
         var seen = Set<Int>()
         for item in design.lanes {
@@ -214,11 +209,11 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
 
     /// Synthesises on a background task, for the rate-change path (never on the main actor or an audio thread).
     func planAsync(
-        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double, unifiedGraphEnabled: Bool = true,
+        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double,
         firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) async throws -> RoomCorrectionLanePlan {
         try await Task.detached(priority: .userInitiated) { [self] in
-            try plan(for: design, sampleRate: sampleRate, unifiedGraphEnabled: unifiedGraphEnabled, firScheme: firScheme)
+            try plan(for: design, sampleRate: sampleRate, firScheme: firScheme)
         }.value
     }
 

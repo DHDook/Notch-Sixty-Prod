@@ -371,12 +371,6 @@ final class EQShipTests: XCTestCase {
         }
     }
 
-    func testMultibandKernelNoteAppearsOnlyForExtraBandsOnTheKernel() {
-        XCTAssertNil(MultibandKernelNote.note(bandCount: 5, graphRendering: true))
-        XCTAssertNil(MultibandKernelNote.note(bandCount: 3, graphRendering: false))
-        XCTAssertEqual(MultibandKernelNote.note(bandCount: 4, graphRendering: false), MultibandKernelNote.text)
-    }
-
     /// E33 G16: the drawn curve is the engine's ideal response at 2 to 10 Hz (a 5 Hz peaking band, both signs, eight rates).
     func testDrawnCurveMatchesTheIdealResponseAtFiveHertzAtEveryRate() {
         for rate in rates {

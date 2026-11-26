@@ -138,14 +138,6 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         XCTAssertNotNil(high.stages.first?.twoBand)
     }
 
-    func testLegacyKernelRefusesWithAReason() throws {
-        let multi = design(mode: .video, laneGrids: [0: try grid(smooth), 1: try grid(smooth)], laneCount: 2)
-        XCTAssertThrowsError(try RoomCorrectionRateCache().plan(for: multi, sampleRate: 48_000, unifiedGraphEnabled: false)) {
-            XCTAssertEqual($0 as? RoomCorrectionLanePlanError, .legacyKernel)
-            XCTAssertTrue((($0 as? LocalizedError)?.errorDescription ?? "").contains("legacy kernel"))
-        }
-    }
-
     func testLaneValidation() throws {
         let g = try grid(smooth)
         let cache = RoomCorrectionRateCache()

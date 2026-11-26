@@ -192,7 +192,7 @@ final class UnifiedGraphStereoHeadphoneTests: XCTestCase {
 
     func testPlannerDecisionsForStereoSessions() {
         func context(graph: Bool) -> HeadphoneLiveEditPlanner.Context {
-            .init(unifiedGraphEnabled: true, lifecycleRunning: true, binauralSession: .none,
+            .init(lifecycleRunning: true, binauralSession: .none,
                   nChannelSessionActive: false, stereoHeadphoneGraphActive: graph)
         }
         let old = profile { $0.enabled = true; $0.outputDeviceUID = "out" }

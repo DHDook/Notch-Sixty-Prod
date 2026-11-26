@@ -22,10 +22,6 @@ struct PreparedSpeakerIRProgram {
 @MainActor
 @Observable
 final class AudioIOEngine {
-    /// E6 S8: set by the app shell (on unless `e6.legacy-kernel` is on). The engine never reads
-    /// the flag itself; with this false the kernel path runs exactly as before.
-    var unifiedGraphEnabled = false
-
     /// E4 S14 (`e4.engine-lease`): when true, a live anti-noise target is guarded by the render
     /// path's dead-man lease. Set once at launch by the app; off enforces no lease.
     var activeQuietZoneLeaseEnabled = false
@@ -235,8 +231,7 @@ final class AudioIOEngine {
     }
 
     /// E4 S30c: whether the live graph can realise conversation-unmasking cuts now: a graph-rendered N-channel session,
-    /// or a stereo speaker session whose unified graph is active (not `e6.legacy-kernel`, no fallback to the kernel).
-    /// The legacy kernel never receives cuts, so the controller falls back to the broad cut when this is false.
+    /// or a stereo speaker session whose unified graph is active.
     var ambientUnmaskingRuntimeAvailable: Bool {
         if ambientCompensationGraphRuntimeAvailable { return true }
         guard let session = transportSession, ambientCompensationStereoSpeakerRuntimeAvailable else { return false }
@@ -1273,11 +1268,9 @@ final class AudioIOEngine {
             generator: liveGenerator)
     }
 
-    /// True when the flag is on and the running N-channel or binaural session is rendered by the graph, so the
-    /// setters can republish it instead of asking for a restart. A session that started on the legacy path (or any
-    /// session with the flag off) keeps `configurationChangeRequiresRestart`.
+    /// True when the running N-channel or binaural session is rendered by the graph, so the setters can republish
+    /// it instead of asking for a restart.
     var liveGraphEditsAvailable: Bool {
-        guard unifiedGraphEnabled else { return false }
         if let session = nChannelTransportSession { return session.unifiedGraphActive }
         if let session = binauralHeadphoneTransportSession { return session.unifiedGraphActive }
         return false

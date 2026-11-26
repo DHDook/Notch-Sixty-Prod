@@ -50,7 +50,6 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: "abx-wiring-out")
-        engine.unifiedGraphEnabled = true
         return engine
     }
 

@@ -19,10 +19,6 @@ struct ProductionProfileSubwooferCard: View {
                     Label("The routing matrix owns the outputs while it is on; these assignments apply when it is off.",
                           systemImage: "info.circle").font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
-                if profile.subwooferAssignments.count > SubwooferLimit.legacyKernel, !engine.unifiedGraphEnabled {
-                    Label("More than \(SubwooferLimit.legacyKernel) subwoofers need the unified graph; the legacy kernel drives at most \(SubwooferLimit.legacyKernel).",
-                          systemImage: "exclamationmark.triangle").font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
-                }
                 if profile.subwooferAssignments.isEmpty {
                     Text("No subwoofers assigned.").foregroundStyle(.secondary)
                 }
