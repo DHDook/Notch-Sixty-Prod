@@ -199,11 +199,11 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testSpeakerIRIsThirdIndependentGlobalConvolutionSlot() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         let eqTaps: [Float] = [0.25, 0.5, 0.25]
         let roomTaps: [Float] = [0.2, 0.6, 0.2]
@@ -213,18 +213,15 @@ final class NotchSixtyTests: XCTestCase {
         var speakerInfo = N60ConvolutionProgramInfo()
 
         XCTAssertTrue(eqTaps.withUnsafeBufferPointer { taps in
-            N60RenderKernelPrepareConvolutionProgram(
-                kernel, 0, taps.baseAddress!, nil, UInt32(taps.count), 0, &eqInfo
+            kernel.prepareConvolutionProgram(0, taps.baseAddress!, nil, UInt32(taps.count), 0, &eqInfo
             )
         })
         XCTAssertTrue(roomTaps.withUnsafeBufferPointer { taps in
-            N60RenderKernelPrepareRoomCorrectionProgram(
-                kernel, 1, taps.baseAddress!, nil, UInt32(taps.count), 1, &roomInfo
+            kernel.prepareRoomCorrectionProgram(1, taps.baseAddress!, nil, UInt32(taps.count), 1, &roomInfo
             )
         })
         XCTAssertTrue(speakerTaps.withUnsafeBufferPointer { taps in
-            N60RenderKernelPrepareSpeakerIRProgram(
-                kernel, 2, taps.baseAddress!, nil, UInt32(taps.count), 2, &speakerInfo
+            kernel.prepareSpeakerIRProgram(2, taps.baseAddress!, nil, UInt32(taps.count), 2, &speakerInfo
             )
         })
 
@@ -237,9 +234,9 @@ final class NotchSixtyTests: XCTestCase {
             + roomInfo.engineLatencyFrames + roomInfo.declaredLatencyFrames
             + speakerInfo.engineLatencyFrames + speakerInfo.declaredLatencyFrames
         XCTAssertEqual(graph.latencyFrames, expectedLatency)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertTrue(diagnostics.convolutionEnabled)
         XCTAssertTrue(diagnostics.roomCorrectionEnabled)
         XCTAssertTrue(diagnostics.speakerIREnabled)
@@ -254,24 +251,23 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testSpeakerIRPublishRejectsUnpreparedGeneration() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         let taps: [Float] = [0.2, 0.6, 0.2]
         var info = N60ConvolutionProgramInfo()
         XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
-            N60RenderKernelPrepareSpeakerIRProgram(
-                kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &info
+            kernel.prepareSpeakerIRProgram(0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &info
             )
         })
         var stale = info
         stale.generation &+= 1
         var graph = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerIRProgram(&graph, 0, stale, true))
-        XCTAssertFalse(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertFalse(kernel.publish(graph))
     }
 
     func testSpeakerIRPolicyKeepsRawBypassRaw() {
@@ -304,19 +300,19 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testCrosstalkCancellationFeedForwardStageRemainsBounded() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetCrosstalkCancellation(&graph, 0.5, 700, true))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         var left: Float = 0
         var right: Float = 0
         for _ in 0..<4096 {
-            N60RenderKernelProcessStereoFrame(kernel, 0, 1, &left, &right)
+            kernel.processFrame(0, 1, &left, &right)
             XCTAssertTrue(left.isFinite && right.isFinite)
             XCTAssertLessThanOrEqual(abs(left), 1.000_01)
             XCTAssertLessThanOrEqual(abs(right), 1.000_01)
@@ -358,18 +354,18 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testSpeakerCrossfeedRealtimeMatrixAndMonoCollapse() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&graph, 0.5, true))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.2, &left, &right)
+        kernel.processFrame(0.8, -0.2, &left, &right)
         XCTAssertEqual(left, 0.3, accuracy: 0.000_01)
         XCTAssertEqual(right, 0.3, accuracy: 0.000_01)
     }
@@ -427,19 +423,19 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testSymmetryBalanceRealtimeExtremePreservesConstantPower() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&graph, -1, true))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.25, 0.25, &left, &right)
+        kernel.processFrame(0.25, 0.25, &left, &right)
         XCTAssertEqual(left, 0.25 * Float(2).squareRoot(), accuracy: 0.000_01)
         XCTAssertEqual(right, 0, accuracy: 0.000_01)
     }
@@ -596,24 +592,24 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testRenderKernelUnityIsTransparentAcrossSupportedRates() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
             let graph = N60DSPGraphSnapshotMakeUnity(rate)
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            XCTAssertTrue(kernel.publish(graph))
 
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, 0.25, -0.5, &left, &right)
+            kernel.processFrame(0.25, -0.5, &left, &right)
 
             XCTAssertEqual(left, 0.25, accuracy: 0.000_001)
             XCTAssertEqual(right, -0.5, accuracy: 0.000_001)
 
-            let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            let diagnostics = kernel.diagnostics
             XCTAssertEqual(diagnostics.sampleRate, rate, accuracy: 0.001)
             XCTAssertEqual(diagnostics.channelCount, 2)
             XCTAssertEqual(diagnostics.latencyFrames, 0)
@@ -622,50 +618,48 @@ final class NotchSixtyTests: XCTestCase {
         }
     }
 
-    func testRenderKernelAppliesGainSnapshotAndBypass() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+    func testStereoGraphAppliesGainSnapshotAndBypass() throws {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         graph.inputGainLinear = 0.5
         graph.outputGainLinear = 0.25
         graph.latencyFrames = 64
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.4, &left, &right)
+        kernel.processFrame(0.8, -0.4, &left, &right)
         XCTAssertEqual(left, 0.1, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.05, accuracy: 0.000_001)
-        XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).latencyFrames, 64)
 
+        // E23 T1: the graph's bypass removes the program DSP and pads the lanes so the toggle keeps the published
+        // latency (decision 16), so the raw samples come out after that latency (parity exception P1).
         graph.bypassed = true
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
-        N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.4, &left, &right)
+        XCTAssertTrue(kernel.publish(graph))
+        for _ in 0..<512 { kernel.processFrame(0.8, -0.4, &left, &right) }
         XCTAssertEqual(left, 0.8, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.4, accuracy: 0.000_001)
     }
 
-    func testRenderKernelSanitizesNonFiniteSamplesAndRejectsInvalidGraphs() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+    func testStereoGraphSanitizesNonFiniteSamples() throws {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
-        var invalid = N60DSPGraphSnapshotMakeUnity(96_000)
-        invalid.channelCount = 1
-        XCTAssertFalse(N60RenderKernelPublishSnapshot(kernel, invalid))
+        XCTAssertTrue(kernel.publish(N60DSPGraphSnapshotMakeUnity(96_000)))
 
         var left: Float = 1
         var right: Float = 1
-        N60RenderKernelProcessStereoFrame(kernel, Float.nan, Float.infinity, &left, &right)
+        kernel.processFrame(Float.nan, Float.infinity, &left, &right)
         XCTAssertEqual(left, 0)
         XCTAssertEqual(right, 0)
-        XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).sanitizedNonFiniteSamples, 2)
     }
 
     func testParametricEQPeakingCenterGainAcrossSupportedRates() {
@@ -1104,57 +1098,57 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testMidSideRealtimeIdentityAndAuditionContracts() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         let pairs: [(Float, Float)] = [(0.25, -0.5), (0.4, 0.4), (0.4, -0.4)]
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         graph.eqMidSideMode = true
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         for pair in pairs {
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, pair.0, pair.1, &left, &right)
+            kernel.processFrame(pair.0, pair.1, &left, &right)
             XCTAssertEqual(left, pair.0, accuracy: 0.000_001)
             XCTAssertEqual(right, pair.1, accuracy: 0.000_001)
         }
 
         graph.auditionMode = N60AuditionModeReference
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.3, -0.2, &left, &right)
+        kernel.processFrame(0.3, -0.2, &left, &right)
         XCTAssertEqual(left, 0.3, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.2, accuracy: 0.000_001)
 
         graph.auditionMode = N60AuditionModeDelta
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
-        N60RenderKernelProcessStereoFrame(kernel, 0.3, -0.2, &left, &right)
+        XCTAssertTrue(kernel.publish(graph))
+        kernel.processFrame(0.3, -0.2, &left, &right)
         XCTAssertEqual(left, 0.0, accuracy: 0.000_001)
         XCTAssertEqual(right, 0.0, accuracy: 0.000_001)
     }
 
     func testMidSideMinimumPhaseRoutesMidAndSideIndependently() throws {
         func settledOutput(channelMask: UInt8, inputLeft: Float, inputRight: Float) throws -> (Float, Float) {
-            guard let kernel = N60RenderKernelCreate() else {
+            guard let kernel = GraphStereoRig.create() else {
                 XCTFail("Unable to allocate render kernel")
                 return (0, 0)
             }
-            defer { N60RenderKernelDestroy(kernel) }
+            defer { kernel.destroy() }
             var graph = N60DSPGraphSnapshotMakeUnity(48_000)
             graph.eqMidSideMode = true
             XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
                 &graph, 0, channelMask, N60BiquadFilterTypeLowShelf,
                 500, 6, 0.707, true
             ))
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            XCTAssertTrue(kernel.publish(graph))
             var left: Float = 0
             var right: Float = 0
             for _ in 0..<4_096 {
-                N60RenderKernelProcessStereoFrame(kernel, inputLeft, inputRight, &left, &right)
+                kernel.processFrame(inputLeft, inputRight, &left, &right)
             }
             return (left, right)
         }
@@ -1211,26 +1205,26 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func testParametricEQPerBandAndStageBypassAreDry() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetEQBand(&graph, 0, N60BiquadFilterTypePeaking, 1_000, 12, 0.707, false))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.2, -0.3, &left, &right)
+        kernel.processFrame(0.2, -0.3, &left, &right)
         XCTAssertEqual(left, 0.2, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.3, accuracy: 0.000_001)
 
         XCTAssertTrue(N60DSPGraphSnapshotSetEQBand(&graph, 0, N60BiquadFilterTypePeaking, 1_000, 12, 0.707, true))
         graph.eqBypassed = true
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
-        N60RenderKernelProcessStereoFrame(kernel, 0.2, -0.3, &left, &right)
+        XCTAssertTrue(kernel.publish(graph))
+        kernel.processFrame(0.2, -0.3, &left, &right)
         XCTAssertEqual(left, 0.2, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.3, accuracy: 0.000_001)
     }
@@ -1307,15 +1301,15 @@ final class NotchSixtyTests: XCTestCase {
                 false
             )
         )
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        defer { kernel.destroy() }
+        XCTAssertTrue(kernel.publish(graph))
         var left: Float = 0
         var right: Float = 0
-        N60RenderKernelProcessStereoFrame(kernel, 0.25, -0.4, &left, &right)
+        kernel.processFrame(0.25, -0.4, &left, &right)
         XCTAssertEqual(left, 0.25, accuracy: 0.000_001)
         XCTAssertEqual(right, -0.4, accuracy: 0.000_001)
     }
@@ -1327,11 +1321,11 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     func test384KHz64BandEQPlusLR48StressRemainsFinite() {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(384_000)
         for index in 0..<Int(N60_MAX_EQ_BANDS) {
@@ -1360,20 +1354,18 @@ final class NotchSixtyTests: XCTestCase {
                 true
             )
         )
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         var left: Float = 0
         var right: Float = 0
         for frame in 0..<32_768 {
             let input = Float(sin(2.0 * Double.pi * 1_000.0 * Double(frame) / 384_000.0) * 0.1)
-            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            kernel.processFrame(input, input, &left, &right)
             XCTAssertTrue(left.isFinite)
             XCTAssertTrue(right.isFinite)
         }
 
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
-        XCTAssertEqual(diagnostics.sanitizedNonFiniteSamples, 0)
-        XCTAssertEqual(diagnostics.snapshotReadMisses, 0)
+        let diagnostics = kernel.diagnostics
         XCTAssertTrue(diagnostics.crossoverEnabled)
         XCTAssertEqual(diagnostics.crossoverSectionCount, 4)
         XCTAssertEqual(diagnostics.eqBandCount, UInt32(N60_MAX_EQ_BANDS))
@@ -1430,18 +1422,18 @@ final class NotchSixtyTests: XCTestCase {
         gainDB: Double,
         q: Double
     ) -> Double {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return .nan
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         guard N60DSPGraphSnapshotSetEQBand(&graph, 0, filterType, filterFrequency, gainDB, q, true) else {
             XCTFail("Unable to configure EQ band")
             return .nan
         }
-        guard N60RenderKernelPublishSnapshot(kernel, graph) else {
+        guard kernel.publish(graph) else {
             XCTFail("Unable to publish EQ graph")
             return .nan
         }
@@ -1456,7 +1448,7 @@ final class NotchSixtyTests: XCTestCase {
         for frame in 0..<(warmupFrames + measurementFrames) {
             let phase = 2.0 * Double.pi * toneFrequency * Double(frame) / sampleRate
             let input = Float(sin(phase) * 0.1)
-            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            kernel.processFrame(input, input, &left, &right)
             if frame >= warmupFrames {
                 inputPower += Double(input * input)
                 outputPower += Double(left * left)
@@ -1474,11 +1466,11 @@ final class NotchSixtyTests: XCTestCase {
         topology: N60CrossoverTopology,
         monitorMode: N60CrossoverMonitorMode
     ) -> Double {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return .nan
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         guard N60DSPGraphSnapshotSetCrossover(
@@ -1489,7 +1481,7 @@ final class NotchSixtyTests: XCTestCase {
             1,
             false,
             true
-        ), N60RenderKernelPublishSnapshot(kernel, graph) else {
+        ), kernel.publish(graph) else {
             XCTFail("Unable to configure crossover")
             return .nan
         }
@@ -1502,7 +1494,7 @@ final class NotchSixtyTests: XCTestCase {
         var right: Float = 0
         for frame in 0..<(warmupFrames + measurementFrames) {
             let input = Float(sin(2.0 * Double.pi * toneFrequency * Double(frame) / sampleRate) * 0.1)
-            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            kernel.processFrame(input, input, &left, &right)
             if frame >= warmupFrames {
                 inputPower += Double(input * input)
                 outputPower += Double(left * left)
@@ -1513,11 +1505,11 @@ final class NotchSixtyTests: XCTestCase {
     }
 
     private func measuredCrossoverSample(inverted: Bool) -> Float {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return .nan
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
         var graph = N60DSPGraphSnapshotMakeUnity(48_000)
         guard N60DSPGraphSnapshotSetCrossover(
             &graph,
@@ -1527,7 +1519,7 @@ final class NotchSixtyTests: XCTestCase {
             1,
             inverted,
             true
-        ), N60RenderKernelPublishSnapshot(kernel, graph) else {
+        ), kernel.publish(graph) else {
             XCTFail("Unable to configure crossover")
             return .nan
         }
@@ -1535,7 +1527,7 @@ final class NotchSixtyTests: XCTestCase {
         var right: Float = 0
         for frame in 0..<16_001 {
             let input = Float(sin(2.0 * Double.pi * 40.0 * Double(frame) / 48_000.0) * 0.1)
-            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            kernel.processFrame(input, input, &left, &right)
         }
         return left
     }
@@ -1592,19 +1584,19 @@ extension NotchSixtyTests {
     }
 
     func testMainsNotchDisabledIsTransparent() throws {
-        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
-        defer { N60RenderKernelDestroy(kernel) }
+        guard let kernel = GraphStereoRig.create() else { return XCTFail("Unable to create render kernel") }
+        defer { kernel.destroy() }
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.enabled = false
         var graph = N60DSPGraphSnapshotMakeUnity(96_000)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: 96_000)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         for frame in 0..<4_000 {
             let leftIn = Float(sin(Double(frame) * 0.071) * 0.35)
             let rightIn = Float(cos(Double(frame) * 0.053) * 0.27)
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, leftIn, rightIn, &left, &right)
+            kernel.processFrame(leftIn, rightIn, &left, &right)
             XCTAssertEqual(left, leftIn, accuracy: 0.000_001)
             XCTAssertEqual(right, rightIn, accuracy: 0.000_001)
         }
@@ -1617,11 +1609,11 @@ extension NotchSixtyTests {
         harmonic: Int,
         depthDB: Double
     ) throws -> Double {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to create render kernel")
             return 0
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
 
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.enabled = true
@@ -1633,7 +1625,7 @@ extension NotchSixtyTests {
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
 
         // A 60 Hz, Q=30 cut has a long physical settling time. Give the
         // realtime IIR enough time to reach steady state before evaluating the
@@ -1647,7 +1639,7 @@ extension NotchSixtyTests {
             let sample = Float(0.1 * sin(2.0 * Double.pi * toneFrequency * Double(frame) / sampleRate))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
             if frame >= settleFrames {
                 inputEnergy += Double(sample * sample)
                 outputEnergy += Double(left * left)
@@ -1663,8 +1655,8 @@ extension NotchSixtyTests {
 
 extension NotchSixtyTests {
     func testMainsHumDetectorFindsOffsetFundamental() throws {
-        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
-        defer { N60RenderKernelDestroy(kernel) }
+        guard let kernel = GraphStereoRig.create() else { return XCTFail("Unable to create render kernel") }
+        defer { kernel.destroy() }
         let sampleRate = 48_000.0
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.enabled = false
@@ -1672,64 +1664,64 @@ extension NotchSixtyTests {
         dynamics.mainsNotch.region = .hz60
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         let frequency = 60.75
         for frame in 0..<Int(sampleRate * 2.2) {
             let sample = Float(0.08 * sin(2.0 * Double.pi * frequency * Double(frame) / sampleRate))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
         }
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertEqual(Double(diagnostics.mainsDetectedFrequencyHz), frequency, accuracy: 0.35)
         XCTAssertGreaterThan(diagnostics.mainsDetectionConfidence, 0.70)
     }
 
     func testMainsHumDetectorRejectsOutOfBandTone() throws {
-        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
-        defer { N60RenderKernelDestroy(kernel) }
+        guard let kernel = GraphStereoRig.create() else { return XCTFail("Unable to create render kernel") }
+        defer { kernel.destroy() }
         let sampleRate = 48_000.0
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.continuousTracking = true
         dynamics.mainsNotch.region = .hz60
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         for frame in 0..<Int(sampleRate * 1.2) {
             let sample = Float(0.1 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
         }
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertLessThan(diagnostics.mainsDetectionConfidence, 0.25)
     }
 
     func testMainsHumDetectorIsParkedWhenContinuousTrackingIsDisabled() throws {
-        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
-        defer { N60RenderKernelDestroy(kernel) }
+        guard let kernel = GraphStereoRig.create() else { return XCTFail("Unable to create render kernel") }
+        defer { kernel.destroy() }
         let sampleRate = 48_000.0
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.continuousTracking = false
         dynamics.mainsNotch.region = .hz60
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         let frequency = 60.75
         for frame in 0..<Int(sampleRate * 2.2) {
             let sample = Float(0.08 * sin(2.0 * Double.pi * frequency * Double(frame) / sampleRate))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
         }
-        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        let diagnostics = kernel.diagnostics
         XCTAssertEqual(diagnostics.mainsDetectedFrequencyHz, 0, accuracy: 0)
         XCTAssertEqual(diagnostics.mainsDetectionConfidence, 0, accuracy: 0)
     }
 
     func testMainsNotchRetuneTransitionRemainsFiniteAndBounded() throws {
-        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
-        defer { N60RenderKernelDestroy(kernel) }
+        guard let kernel = GraphStereoRig.create() else { return XCTFail("Unable to create render kernel") }
+        defer { kernel.destroy() }
         let sampleRate = 48_000.0
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.enabled = true
@@ -1738,19 +1730,19 @@ extension NotchSixtyTests {
         dynamics.mainsNotch.harmonicDepthsDB[0] = -24
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         var previous: Float = 0
         var maximumJump: Float = 0
         for frame in 0..<12_000 {
             if frame == 6_000 {
                 dynamics.mainsNotch.detectedFundamentalHz = 60.8
                 graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
-                XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+                XCTAssertTrue(kernel.publish(graph))
             }
             let sample = Float(0.1 * sin(2.0 * Double.pi * 60.4 * Double(frame) / sampleRate))
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            kernel.processFrame(sample, sample, &left, &right)
             XCTAssertTrue(left.isFinite)
             maximumJump = max(maximumJump, abs(left - previous))
             previous = left
@@ -1909,13 +1901,13 @@ extension NotchSixtyTests {
     }
 
     func testSpectralDenoiserGraphUnityBeforeProfileReadyMatchesLatencyReference() throws {
-        guard let processedKernel = N60RenderKernelCreate(), let referenceKernel = N60RenderKernelCreate() else {
+        guard let processedKernel = GraphStereoRig.create(), let referenceKernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernels")
             return
         }
         defer {
-            N60RenderKernelDestroy(processedKernel)
-            N60RenderKernelDestroy(referenceKernel)
+            processedKernel.destroy()
+            referenceKernel.destroy()
         }
 
         var dynamics = DynamicsConfiguration()
@@ -1936,8 +1928,8 @@ extension NotchSixtyTests {
             dynamicsConfiguration: dynamics,
             playbackConfiguration: PlaybackControlConfiguration(auditionMode: .reference)
         )
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(processedKernel, processedGraph))
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(referenceKernel, referenceGraph))
+        XCTAssertTrue(processedKernel.publish(processedGraph))
+        XCTAssertTrue(referenceKernel.publish(referenceGraph))
 
         let totalFrames = 22_000
         var squaredError = 0.0
@@ -1949,8 +1941,8 @@ extension NotchSixtyTests {
             var processedRight: Float = 0
             var referenceLeft: Float = 0
             var referenceRight: Float = 0
-            N60RenderKernelProcessStereoFrame(processedKernel, source, source * 0.7, &processedLeft, &processedRight)
-            N60RenderKernelProcessStereoFrame(referenceKernel, source, source * 0.7, &referenceLeft, &referenceRight)
+            processedKernel.processFrame(source, source * 0.7, &processedLeft, &processedRight)
+            referenceKernel.processFrame(source, source * 0.7, &referenceLeft, &referenceRight)
             if frame > Int(processedGraph.latencyFrames + processedGraph.dynamics.spectralDenoiser.hopSize + 256) {
                 let error = Double(processedLeft - referenceLeft)
                 squaredError += error * error
@@ -1964,11 +1956,11 @@ extension NotchSixtyTests {
     }
 
     func testSpectralDenoiserGraphStaysFiniteAt384k() throws {
-        guard let kernel = N60RenderKernelCreate() else {
+        guard let kernel = GraphStereoRig.create() else {
             XCTFail("Unable to allocate render kernel")
             return
         }
-        defer { N60RenderKernelDestroy(kernel) }
+        defer { kernel.destroy() }
         var dynamics = DynamicsConfiguration()
         dynamics.spectralDenoiser.enabled = true
         dynamics.spectralDenoiser.applyPreset(.natural)
@@ -1980,7 +1972,7 @@ extension NotchSixtyTests {
             dynamicsConfiguration: dynamics,
             playbackConfiguration: PlaybackControlConfiguration()
         )
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        XCTAssertTrue(kernel.publish(graph))
         var state: UInt32 = 0xCAFEBABE
         var maxMagnitude: Float = 0
         for _ in 0..<30_000 {
@@ -1988,13 +1980,13 @@ extension NotchSixtyTests {
             let sample = (Float(state & 0xFFFF) / 32_767.5 - 1) * 0.1
             var left: Float = 0
             var right: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, sample, -sample * 0.8, &left, &right)
+            kernel.processFrame(sample, -sample * 0.8, &left, &right)
             XCTAssertTrue(left.isFinite)
             XCTAssertTrue(right.isFinite)
             maxMagnitude = max(maxMagnitude, max(abs(left), abs(right)))
         }
         XCTAssertLessThan(maxMagnitude, 1.0)
-        XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).denoiserLatencyFrames, 4096)
+        XCTAssertEqual(kernel.diagnostics.denoiserLatencyFrames, 4096)
     }
 }
 

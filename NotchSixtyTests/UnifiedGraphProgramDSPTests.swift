@@ -613,15 +613,15 @@ extension UnifiedGraphProgramDSPTests {
         let input = (0..<inputFrames).map { _ in noise() * 0.5 }
         let total = tapCount + inputFrames + 1_024
         for rate in Self.rates {
-            let kernel = try XCTUnwrap(N60RenderKernelCreate())
-            defer { N60RenderKernelDestroy(kernel) }
+            let kernel = try XCTUnwrap(GraphStereoRig.create())
+            defer { kernel.destroy() }
             var info = N60ConvolutionProgramInfo()
             XCTAssertTrue(taps.withUnsafeBufferPointer {
-                N60RenderKernelPrepareConvolutionProgram(kernel, 0, $0.baseAddress!, nil, UInt32(tapCount), 0, &info)
+                kernel.prepareConvolutionProgram(0, $0.baseAddress!, nil, UInt32(tapCount), 0, &info)
             })
             var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
             XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&snapshot, 0, info, true))
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
+            XCTAssertTrue(kernel.publish(snapshot))
             let program = UnifiedGraphFIRProgram(
                 generation: info.generation, left: taps, right: nil, declaredLatencyFrames: 0)
             // Flag off: the 262,144-tap filter stays on the kernel.
@@ -636,7 +636,7 @@ extension UnifiedGraphProgramDSPTests {
             var left: Float = 0, right: Float = 0
             for frame in 0..<total {
                 let x: Float = frame < inputFrames ? input[frame] : 0
-                N60RenderKernelProcessStereoFrame(kernel, x, x, &left, &right)
+                kernel.processFrame(x, x, &left, &right)
                 kernelOut[frame] = left
             }
             var graphOut = [Float](repeating: 0, count: total)
