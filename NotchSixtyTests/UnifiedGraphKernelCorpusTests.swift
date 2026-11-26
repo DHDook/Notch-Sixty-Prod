@@ -1,11 +1,12 @@
 import XCTest
 @testable import NotchSixty
 
-/// E23 S1 (E6 G1): the full-configuration graph-versus-kernel corpus and the stereo-chain latency
-/// test. The kernel is the only reference for stereo, so this corpus has to be green before
-/// `N60RenderKernel` is deleted. Every configuration here has many stages on at once (the per-stage
-/// parity lives in `UnifiedGraphStageParityTests`); each is rendered over a fixed signal corpus
-/// (noise, a sweep, an impulse train, clipping edges) at the eight standard rates.
+/// E23 S1 (E6 G1), moved to the frozen corpus in E23 T1b: the full-configuration corpus and the stereo-chain latency
+/// test. Every configuration here has many stages on at once (the per-stage parity lives in
+/// `UnifiedGraphStageParityTests`); each is rendered over a fixed signal corpus (noise, a sweep, an impulse train,
+/// clipping edges) at the eight standard rates and compared with the record in
+/// `Fixtures/E23Corpus/kernel-corpus.json` (see `E23Corpus`: 0.01 dB block RMS, 1e-5 per sample). The record was written in a
+/// run where the graph agreed with the kernel at the tolerances that used to be asserted here.
 final class UnifiedGraphKernelCorpusTests: XCTestCase {
     private static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     private static let block = 512
@@ -14,6 +15,7 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
     /// graph added one at -1 dBFS and the clipping lane read half the kernel's level. The corpus compares the stages, not
     /// the output protection (`OutputProtectionTests` covers that), so it is switched off here and put back after.
     @MainActor override func setUpWithError() throws {
+        E23Corpus.beginTest()
         let suite = "G115-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
@@ -64,17 +66,7 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
 
     // MARK: Renderers
 
-    private func kernelRender(_ snapshot: N60DSPGraphSnapshot, _ input: [[Float]]) throws -> [[Float]] {
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
-        var left = [Float](repeating: 0, count: input[0].count)
-        var right = left
-        for i in 0..<left.count {
-            N60RenderKernelProcessStereoFrame(kernel, input[0][i], input[1][i], &left[i], &right[i])
-        }
-        return [left, right]
-    }
+    private var lastLatency = 0
 
     private func graphHost(_ snapshot: N60DSPGraphSnapshot, rate: Double) throws -> UnifiedGraphHost {
         var snapshot = snapshot
@@ -82,7 +74,9 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
             UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate),
             "configuration should be graph-eligible at \(rate)"
         )
-        return try UnifiedGraphHost(spec: try configuration.makeSpec())
+        let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        lastLatency = Int(host.latencyFrames)
+        return host
     }
 
     private func graphRender(_ host: UnifiedGraphHost, _ input: [[Float]]) throws -> [[Float]] {
@@ -104,10 +98,11 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
 
     // MARK: Full-configuration corpus
 
-    /// Every enabled stage rendered by the kernel and the graph; RMS of the difference over the run
-    /// (first quarter discarded for filter and detector settling) relative to the kernel RMS.
+    /// Every case is rendered by the graph and compared with the frozen record. When the corpus is written, the kernel renders
+    /// it too and the original check runs: RMS of the difference over the run (first quarter discarded for filter and detector
+    /// settling) relative to the kernel RMS.
     private func assertCorpus(
-        _ name: String, tolerance: Double, signals: [Signal] = Signal.allCases,
+        _ name: String, tolerance: Double, signals: [Signal] = Signal.allCases, test: String = #function,
         make: (Double) -> N60DSPGraphSnapshot
     ) throws {
         for rate in Self.rates {
@@ -115,24 +110,25 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
             let frames = Int(rate * 0.6) / Self.block * Self.block
             for kind in signals {
                 let input = signal(kind, rate: rate, frames: frames)
-                let reference = try kernelRender(snapshot, input)
                 let candidate = try graphRender(try graphHost(snapshot, rate: rate), input)
-                let start = frames / 4
-                for lane in 0..<2 {
-                    XCTAssertTrue(candidate[lane].allSatisfy { $0.isFinite }, "\(name) \(kind) lane \(lane) rate \(rate)")
-                    let ref = reference[lane][start...]
-                    let got = candidate[lane][start...]
-                    var errorEnergy = 0.0
-                    for (a, b) in zip(ref, got) { errorEnergy += pow(Double(a - b), 2) }
-                    let errorRMS = sqrt(errorEnergy / Double(ref.count))
-                    let scale = max(rms(ref), 1e-4)
-                    if ProcessInfo.processInfo.environment["N60_CORPUS_PRINT"] != nil {
-                        print("CORPUS \(name) \(kind) lane \(lane) rate \(Int(rate)): err/ref \(errorRMS / scale) ref rms \(rms(ref))")
+                try E23Corpus.check(
+                    group: "kernel-corpus", test: test, label: "\(name) \(kind)", rate: rate, snapshot: snapshot,
+                    input: input, output: candidate, latency: lastLatency
+                ) { reference, candidate in
+                    let start = frames / 4
+                    for lane in 0..<2 {
+                        XCTAssertTrue(candidate[lane].allSatisfy { $0.isFinite }, "\(name) \(kind) lane \(lane) rate \(rate)")
+                        let ref = reference[lane][start...]
+                        let got = candidate[lane][start...]
+                        var errorEnergy = 0.0
+                        for (a, b) in zip(ref, got) { errorEnergy += pow(Double(a - b), 2) }
+                        let errorRMS = sqrt(errorEnergy / Double(ref.count))
+                        let scale = max(self.rms(ref), 1e-4)
+                        XCTAssertLessThan(errorRMS / scale, tolerance, "\(name) \(kind) lane \(lane) rate \(rate)")
+                        // The level must agree closely even where the waveform differs (detector timing).
+                        XCTAssertEqual(self.rms(got), self.rms(ref), accuracy: max(0.1 * self.rms(ref), 1e-4),
+                                       "\(name) \(kind) lane \(lane) rate \(rate) level")
                     }
-                                        XCTAssertLessThan(errorRMS / scale, tolerance, "\(name) \(kind) lane \(lane) rate \(rate)")
-                    // The level must agree closely even where the waveform differs (detector timing).
-                    XCTAssertEqual(rms(got), rms(ref), accuracy: max(0.1 * rms(ref), 1e-4),
-                                   "\(name) \(kind) lane \(lane) rate \(rate) level")
                 }
             }
         }
@@ -212,19 +208,24 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
     /// kernel alone and in pairs, and two ordering differences remain. (1) The graph runs the compressor and expander before
     /// the stereo crossover, the kernel after it. (2) The graph folds the master gain into the lane output gain ahead of the
     /// protection, the kernel applies it after the protection. A clipped lane exposes both; unclipped signals do not.
-    /// This test pins the master-gain exception so a change to it is a decision, not an accident.
-    func testMasterGainSitsBeforeTheProtectionInTheGraphAndAfterItInTheKernel() throws {
+    /// This test pins the master-gain exception (graph half only since E23 T1b) so a change to it is a decision, not an accident.
+    func testMasterGainSitsBeforeTheProtectionInTheGraph() throws {
         for rate in [44_100.0, 176_400] {
             var s = N60DSPGraphSnapshotMakeUnity(rate)
             XCTAssertTrue(N60ProtectionSnapshotSetSoftClipperAdvanced(&s.protection, true, 6, -2, 0.5, N60ClipperCurveCubic, true, 1.0))
             s.masterGainLinear = 0.9
             let frames = Int(rate * 0.3) / Self.block * Self.block
             let input = signal(.clipping, rate: rate, frames: frames)
-            let kernel = try kernelRender(s, input)
             let graph = try graphRender(try graphHost(s, rate: rate), input)
+            var unity = s
+            unity.masterGainLinear = 1
+            let reference = try graphRender(try graphHost(unity, rate: rate), input)
             let start = frames / 2
-            let kernelRMS = rms(kernel[0][start...]), graphRMS = rms(graph[0][start...])
-            XCTAssertEqual(kernelRMS, 0.9 * graphRMS, accuracy: 0.002 * graphRMS, "kernel scales after the clipper, rate \(rate)")
+            let graphRMS = rms(graph[0][start...]), unityRMS = rms(reference[0][start...])
+            // The clipper's ceiling is absolute in the graph: the master gain folded in ahead of it does not scale a clipped
+            // lane. (The kernel applied it after the clipper and read 0.9 times this level; that is the documented exception.)
+            XCTAssertGreaterThan(unityRMS, 0.05, "the clipped lane carries signal, rate \(rate)")
+            XCTAssertEqual(graphRMS, unityRMS, accuracy: 0.002 * unityRMS, "master gain sits before the clipper, rate \(rate)")
         }
     }
 
@@ -325,7 +326,7 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
     // MARK: Latency
 
     /// The latency the graph reports equals the delay of an impulse measured at the output, and both
-    /// equal the kernel's delay, with a latency-adding chain (oversampled protection).
+    /// equal the frozen kernel delay (corpus), with a latency-adding chain (oversampled protection).
     func testReportedLatencyEqualsTheMeasuredImpulseDelayAtEveryRate() throws {
         for rate in Self.rates {
             for oversampling in [N60OversamplingFactor2x, N60OversamplingFactor4x] {
@@ -338,20 +339,25 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
                 impulse[1][100] = 0.2
                 let host = try graphHost(s, rate: rate)
                 let graph = try graphRender(host, impulse)
-                let kernel = try kernelRender(s, impulse)
                 let label = "oversampling \(oversampling.rawValue) rate \(rate)"
                 let graphDelay = try XCTUnwrap(centroidDelay(graph[0], impulseAt: 100), label)
-                let kernelDelay = try XCTUnwrap(centroidDelay(kernel[0], impulseAt: 100), label)
                 // E23 S1c G2 root cause: the look-ahead is a whole number of oversampled samples, so its delay in frames is
                 // fractional (353 / 4 = 88.25 at 44.1 kHz), and the report rounds it up to whole frames. The report is therefore
                 // never short and at most one frame long; the energy centroid of the linear-phase response measures it exactly.
                 XCTAssertGreaterThanOrEqual(Double(host.latencyFrames) - graphDelay, -0.05, "report never short, \(label)")
                 XCTAssertLessThan(Double(host.latencyFrames) - graphDelay, 1.0, "report within one frame (ceil of a fraction), \(label)")
-                // Parity exception (E32 S6, for the E23 S1 corpus): with `e32.dynamics-sound` the graph's true-peak factor follows
-                // the rate (1x from 176.4 kHz, 2x at 88.2 and 96 kHz) while the frozen kernel keeps a fixed 4x, so the delays
-                // differ by design wherever the rate's factor is not 4.
-                if !DynamicsSoundFixes.isEnabled || DynamicsSoundFixes.truePeakFactor(sampleRate: rate) == 4 {
-                    XCTAssertEqual(graphDelay, kernelDelay, accuracy: 0.5, "graph vs kernel measured, \(label)")
+                // The graph's response is frozen in the corpus. It was written in a run where its measured delay agreed with the
+                // kernel's within half a frame, except where the rate's true-peak factor is not 4: with `e32.dynamics-sound` the
+                // graph's factor follows the rate (1x from 176.4 kHz, 2x at 88.2 and 96 kHz) while the kernel keeps a fixed 4x
+                // (parity exception, E32 S6).
+                try E23Corpus.check(
+                    group: "kernel-corpus", test: #function, label: label, rate: rate, snapshot: s, input: impulse,
+                    output: graph, latency: Int(host.latencyFrames)
+                ) { kernel, graph in
+                    let kernelDelay = try XCTUnwrap(self.centroidDelay(kernel[0], impulseAt: 100), label)
+                    if !DynamicsSoundFixes.isEnabled || DynamicsSoundFixes.truePeakFactor(sampleRate: rate) == 4 {
+                        XCTAssertEqual(graphDelay, kernelDelay, accuracy: 0.5, "graph vs kernel measured, \(label)")
+                    }
                 }
             }
         }
@@ -364,5 +370,30 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
         for (i, v) in x.enumerated() { let e = Double(v) * Double(v); weighted += Double(i) * e; total += e }
         guard total > 1e-12 else { return nil }
         return weighted / total - Double(impulseAt)
+    }
+
+    // MARK: Comparator self-test (E23 T1b)
+
+    /// The corpus must catch a real change: one block moved by 0.02 dB fails, 0.005 dB passes, and so does a sample off by
+    /// 2e-5 versus 5e-6.
+    func testTheCorpusComparatorCatchesAChangedBlockAndSample() {
+        let input = signal(.noise, rate: 48_000, frames: 4_096)
+        let record = E23Corpus.summarise(input, latency: 12)
+        XCTAssertEqual(record.lanes[0].blocksDB.count, E23Corpus.blockCount)
+        XCTAssertEqual(record.lanes[0].samples.count, E23Corpus.sampleCount)
+        XCTAssertTrue(E23Corpus.differences(expected: record, got: record).isEmpty)
+        var block = record
+        block.lanes[1].blocksDB[17] += 0.02
+        XCTAssertFalse(E23Corpus.differences(expected: record, got: block).isEmpty, "0.02 dB in one block must fail")
+        block.lanes[1].blocksDB[17] = record.lanes[1].blocksDB[17] + 0.005
+        XCTAssertTrue(E23Corpus.differences(expected: record, got: block).isEmpty, "0.005 dB is inside the tolerance")
+        var sample = record
+        sample.lanes[0].samples[9] += 2e-5
+        XCTAssertFalse(E23Corpus.differences(expected: record, got: sample).isEmpty, "2e-5 on one sample must fail")
+        sample.lanes[0].samples[9] = record.lanes[0].samples[9] + 5e-6
+        XCTAssertTrue(E23Corpus.differences(expected: record, got: sample).isEmpty)
+        var late = record
+        late.latency += 1
+        XCTAssertFalse(E23Corpus.differences(expected: record, got: late).isEmpty, "a latency change must fail")
     }
 }

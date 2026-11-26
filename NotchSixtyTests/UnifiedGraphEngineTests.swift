@@ -627,10 +627,30 @@ final class UnifiedGraphEngineTests: XCTestCase {
 
 
 /// E6 S8b2a: each newly eligible kernel stage renders through libn60core the way the kernel
-/// renders it, at every standard rate. The kernel is the reference: the same snapshot goes to
-/// a real `N60RenderKernel` and to the translated graph, and the settled output is compared.
+/// renders it, at every standard rate. Since E23 T1b the reference is the frozen corpus
+/// (`Fixtures/E23Corpus/stage-parity.json`, see `E23Corpus`): the translated graph's output is
+/// compared with a record that was written in a run where it agreed with a real `N60RenderKernel`.
 final class UnifiedGraphStageParityTests: XCTestCase {
     private static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+    /// Latency of the host the last `graphRender` built, recorded with each frozen corpus entry.
+    private var lastLatency = 0
+    /// Program generations for the convolver tests (E23 T1b: prepared without a kernel).
+    private var nextProgramGeneration: UInt64 = 1
+
+    override func setUp() { E23Corpus.beginTest() }
+
+    /// E23 T1b: checks the graph's `output` against the frozen corpus (E23Corpus.swift); when the corpus is being written,
+    /// also renders the kernel and runs `parity` (the test's original kernel assertions) on the pair.
+    private func corpus(
+        _ label: String, rate: Double, snapshot: N60DSPGraphSnapshot, input: [[Float]], output: [[Float]],
+        programs: [E23KernelProgram] = [], test: String = #function,
+        file: StaticString = #filePath, line: UInt = #line,
+        parity: ([[Float]], [[Float]]) throws -> Void
+    ) throws {
+        try E23Corpus.check(
+            group: "stage-parity", test: test, label: label, rate: rate, snapshot: snapshot, programs: programs,
+            input: input, output: output, latency: lastLatency, kernelParity: parity, file: file, line: line)
+    }
 
     private func tone(_ hz: Double, rate: Double, frames: Int, amplitude: Float) -> [Float] {
         (0..<frames).map { Float(Double(amplitude) * sin(2.0 * .pi * hz * Double($0) / rate)) }
@@ -645,18 +665,6 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         return [left, right]
     }
 
-    private func kernelRender(_ snapshot: N60DSPGraphSnapshot, _ input: [[Float]]) throws -> [[Float]] {
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
-        var left = [Float](repeating: 0, count: input[0].count)
-        var right = left
-        for i in 0..<left.count {
-            N60RenderKernelProcessStereoFrame(kernel, input[0][i], input[1][i], &left[i], &right[i])
-        }
-        return [left, right]
-    }
-
     private func graphRender(_ snapshot: N60DSPGraphSnapshot, _ input: [[Float]], rate: Double) throws -> [[Float]] {
         var snapshot = snapshot
         let configuration = try XCTUnwrap(
@@ -664,6 +672,7 @@ final class UnifiedGraphStageParityTests: XCTestCase {
             "snapshot should be eligible at \(rate)"
         )
         let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        lastLatency = Int(host.latencyFrames)
         var out: [[Float]] = [[], []]
         var position = 0
         while position + 512 <= input[0].count {
@@ -680,26 +689,29 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         sqrt(x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(max(x.count, 1)))
     }
 
-    /// Final quarter: sample-wise difference (linear stages) or RMS ratio (dynamics).
+    /// The graph's output is checked against the frozen corpus. The kernel assertions below (final quarter: sample-wise
+    /// difference for linear stages, RMS ratio for dynamics) run only when the corpus is written.
     private func assertParity(
         _ snapshot: N60DSPGraphSnapshot, rate: Double, sampleWise: Bool = true,
-        amplitude: Float = 0.25, tolerance: Double = 0.01, _ label: String
+        amplitude: Float = 0.25, tolerance: Double = 0.01, _ label: String, test: String = #function,
+        file: StaticString = #filePath, line: UInt = #line
     ) throws {
         let input = stimulus(rate: rate, amplitude: amplitude)
-        let reference = try kernelRender(snapshot, input)
         let candidate = try graphRender(snapshot, input, rate: rate)
-        let start = input[0].count * 3 / 4
-        for lane in 0..<2 {
-            let ref = reference[lane][start...]
-            let got = candidate[lane][start...]
-            if sampleWise {
-                var worst: Float = 0
-                for (a, b) in zip(ref, got) { worst = max(worst, abs(a - b)) }
-                XCTAssertLessThan(Double(worst), tolerance * max(rms(ref) * 4, 0.05), "\(label) lane \(lane) rate \(rate)")
-            } else {
-                let expected = rms(ref)
-                XCTAssertEqual(rms(got), expected, accuracy: max(expected * tolerance, 1e-5),
-                               "\(label) lane \(lane) rate \(rate)")
+        try corpus(label, rate: rate, snapshot: snapshot, input: input, output: candidate, test: test, file: file, line: line) { reference, candidate in
+            let start = input[0].count * 3 / 4
+            for lane in 0..<2 {
+                let ref = reference[lane][start...]
+                let got = candidate[lane][start...]
+                if sampleWise {
+                    var worst: Float = 0
+                    for (a, b) in zip(ref, got) { worst = max(worst, abs(a - b)) }
+                    XCTAssertLessThan(Double(worst), tolerance * max(self.rms(ref) * 4, 0.05), "\(label) lane \(lane) rate \(rate)")
+                } else {
+                    let expected = self.rms(ref)
+                    XCTAssertEqual(self.rms(got), expected, accuracy: max(expected * tolerance, 1e-5),
+                                   "\(label) lane \(lane) rate \(rate)")
+                }
             }
         }
     }
@@ -1020,15 +1032,18 @@ final class UnifiedGraphStageParityTests: XCTestCase {
             let latencyHost = try UnifiedGraphHost(spec: try configuration.makeSpec())
             XCTAssertEqual(latencyHost.latencyFrames, s.latencyFrames + s.dynamics.spectralDenoiser.latencyFrames, "denoiser latency, rate \(rate)")
             let input = noisyStimulus(rate: rate, seconds: 2.5)
-            let reference = try kernelRender(s, input)
             let candidate = try graphRender(s, input, rate: rate)
             let start = input[0].count * 3 / 4
             for lane in 0..<2 {
-                let expected = rms(reference[lane][start...])
-                XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: expected * 0.05,
-                               "denoiser lane \(lane) rate \(rate)")
                 XCTAssertLessThan(rms(candidate[lane][start...]), rms(input[lane][start...]) * 0.999,
                                   "the denoiser should be removing something at \(rate)")
+            }
+            try corpus("denoiser", rate: rate, snapshot: s, input: input, output: candidate) { reference, candidate in
+                for lane in 0..<2 {
+                    let expected = self.rms(reference[lane][start...])
+                    XCTAssertEqual(self.rms(candidate[lane][start...]), expected, accuracy: expected * 0.05,
+                                   "denoiser lane \(lane) rate \(rate)")
+                }
             }
         }
     }
@@ -1046,13 +1061,14 @@ final class UnifiedGraphStageParityTests: XCTestCase {
             XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
                 &s.dynamics, rate, true, tuning, quality, 0.9, -45, protected, 0, 400, revision, command))
             let input = noisyStimulus(rate: rate, seconds: 4)
-            let reference = try kernelRender(s, input)
             let candidate = try graphRender(s, input, rate: rate)
             let start = input[0].count * 3 / 4
-            for lane in 0..<2 {
-                let expected = rms(reference[lane][start...])
-                XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: expected * 0.05,
-                               "denoiser \(tuning) \(quality) lane \(lane)")
+            try corpus("denoiser \(tuning) \(quality)", rate: rate, snapshot: s, input: input, output: candidate) { reference, candidate in
+                for lane in 0..<2 {
+                    let expected = self.rms(reference[lane][start...])
+                    XCTAssertEqual(self.rms(candidate[lane][start...]), expected, accuracy: expected * 0.05,
+                                   "denoiser \(tuning) \(quality) lane \(lane)")
+                }
             }
         }
     }
@@ -1067,12 +1083,13 @@ final class UnifiedGraphStageParityTests: XCTestCase {
             &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, 2_000, -3, 1.2, true))
         XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, rate, true, -60, 2, -20, 2, 80))
         let input = noisyStimulus(rate: rate, seconds: 3)
-        let reference = try kernelRender(s, input)
         let candidate = try graphRender(s, input, rate: rate)
         let start = input[0].count * 3 / 4
-        for lane in 0..<2 {
-            let expected = rms(reference[lane][start...])
-            XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: expected * 0.06, "lane \(lane)")
+        try corpus("denoiser, EQ and expander", rate: rate, snapshot: s, input: input, output: candidate) { reference, candidate in
+            for lane in 0..<2 {
+                let expected = self.rms(reference[lane][start...])
+                XCTAssertEqual(self.rms(candidate[lane][start...]), expected, accuracy: expected * 0.06, "lane \(lane)")
+            }
         }
     }
 
@@ -1107,13 +1124,14 @@ final class UnifiedGraphStageParityTests: XCTestCase {
                 &s.dynamics, rate, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
                 0.9, -50, false, 0, 150, 1, N60DenoiserProfileCommandCapture))
             let input = noisyStimulus(rate: rate, seconds: 3.0)
-            let reference = try kernelRender(s, input)
             let candidate = try graphRender(s, input, rate: rate)
             let start = input[0].count * 3 / 4
-            for lane in 0..<2 {
-                let expected = rms(reference[lane][start...])
-                XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: max(expected * 0.05, 2e-5),
-                               "captured profile lane \(lane) rate \(rate)")
+            try corpus("captured profile", rate: rate, snapshot: s, input: input, output: candidate) { reference, candidate in
+                for lane in 0..<2 {
+                    let expected = self.rms(reference[lane][start...])
+                    XCTAssertEqual(self.rms(candidate[lane][start...]), expected, accuracy: max(expected * 0.05, 2e-5),
+                                   "captured profile lane \(lane) rate \(rate)")
+                }
             }
         }
     }
@@ -1171,29 +1189,21 @@ extension UnifiedGraphStageParityTests {
         }
     }
 
+    /// Builds the program the way `AudioIOEngine+ProgramApply` does: a local generation and the info the setters take.
     private func prepare(
-        _ kernel: OpaquePointer, kind: UnifiedGraphProgramKind, slot: UInt32,
-        left: [Float], right: [Float]?, declared: UInt32
+        kind: UnifiedGraphProgramKind, slot: UInt32 = 0, left: [Float], right: [Float]?, declared: UInt32
     ) throws -> Prepared {
-        var info = N60ConvolutionProgramInfo()
-        let count = UInt32(left.count)
-        let ok: Bool = left.withUnsafeBufferPointer { l in
-            func call(_ r: UnsafePointer<Float>?) -> Bool {
-                switch kind {
-                case .convolution:
-                    return N60RenderKernelPrepareConvolutionProgram(kernel, slot, l.baseAddress!, r, count, declared, &info)
-                case .roomCorrection:
-                    return N60RenderKernelPrepareRoomCorrectionProgram(kernel, slot, l.baseAddress!, r, count, declared, &info)
-                case .speakerIR:
-                    return N60RenderKernelPrepareSpeakerIRProgram(kernel, slot, l.baseAddress!, r, count, declared, &info)
-                }
-            }
-            if let right { return right.withUnsafeBufferPointer { call($0.baseAddress) } }
-            return call(nil)
-        }
-        XCTAssertTrue(ok)
+        let generation = nextProgramGeneration
+        nextProgramGeneration += 1
+        let info = N60ConvolutionProgramInfo(
+            prepared: true,
+            generation: generation,
+            tapCount: UInt32(left.count),
+            partitionCount: N60ConvolutionPartitionCountForTapCount(UInt32(left.count)),
+            engineLatencyFrames: N60_CONVOLUTION_PARTITION_FRAMES,
+            declaredLatencyFrames: declared)
         return Prepared(info: info, program: UnifiedGraphFIRProgram(
-            generation: info.generation, left: left, right: right, declaredLatencyFrames: declared))
+            generation: generation, left: left, right: right, declaredLatencyFrames: declared))
     }
 
     private func select(_ s: inout N60DSPGraphSnapshot, kind: UnifiedGraphProgramKind, slot: UInt32, _ p: Prepared) {
@@ -1210,15 +1220,6 @@ extension UnifiedGraphStageParityTests {
 
     private func firRate(_ rate: Double) -> Int { Int(rate * 0.4) / 512 * 512 }
 
-    private func runKernel(_ kernel: OpaquePointer, _ input: [[Float]], from: Int, to: Int, into out: inout [[Float]]) {
-        for i in from..<to {
-            var l: Float = 0, r: Float = 0
-            N60RenderKernelProcessStereoFrame(kernel, input[0][i], input[1][i], &l, &r)
-            out[0][i] = l
-            out[1][i] = r
-        }
-    }
-
     private func checkParity(_ ref: [[Float]], _ got: [[Float]], tolerance: Double, _ label: String) {
         let start = ref[0].count * 3 / 4
         for lane in 0..<2 {
@@ -1232,20 +1233,16 @@ extension UnifiedGraphStageParityTests {
     private func firCase(
         rate: Double, kind: UnifiedGraphProgramKind, stereoTaps: Bool, tapCount: Int, declared: UInt32,
         order: UnifiedGraphOrderPolicy = .canonical,
-        extra: (inout N60DSPGraphSnapshot) -> Void = { _ in }, _ label: String
+        extra: (inout N60DSPGraphSnapshot) -> Void = { _ in }, _ label: String, test: String = #function,
+        file: StaticString = #filePath, line: UInt = #line
     ) throws {
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
         let left = taps(count: tapCount, seed: 0.21)
         let right = stereoTaps ? taps(count: tapCount, seed: 0.37) : nil
-        let prepared = try prepare(kernel, kind: kind, slot: 0, left: left, right: right, declared: declared)
+        let prepared = try prepare(kind: kind, slot: 0, left: left, right: right, declared: declared)
         var s = N60DSPGraphSnapshotMakeUnity(rate)
         select(&s, kind: kind, slot: 0, prepared)
         extra(&s)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s))
         let input = stimulus(rate: rate)
-        var ref: [[Float]] = [[Float](repeating: 0, count: input[0].count), [Float](repeating: 0, count: input[0].count)]
-        runKernel(kernel, input, from: 0, to: input[0].count, into: &ref)
 
         var graphSnapshot = s
         var configuration = try XCTUnwrap(
@@ -1256,6 +1253,7 @@ extension UnifiedGraphStageParityTests {
         let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
         XCTAssertEqual(host.latencyFrames, prepared.info.engineLatencyFrames + prepared.info.declaredLatencyFrames,
                        "\(label) latency at \(rate)")
+        lastLatency = Int(host.latencyFrames)
         var got: [[Float]] = [[], []]
         var position = 0
         while position + 512 <= input[0].count {
@@ -1263,7 +1261,11 @@ extension UnifiedGraphStageParityTests {
             got[0] += r[0]; got[1] += r[1]
             position += 512
         }
-        checkParity(ref, got, tolerance: 0.02, "\(label) rate \(rate)")
+        try corpus(label, rate: rate, snapshot: s, input: input, output: got,
+                   programs: [E23KernelProgram(kind: kind, left: left, right: right, declared: declared)],
+                   test: test, file: file, line: line) { ref, got in
+            self.checkParity(ref, got, tolerance: 0.02, "\(label) rate \(rate)")
+        }
     }
 
     func testProgramFIRMatchesTheKernelAtEveryRate() throws {
@@ -1308,9 +1310,7 @@ extension UnifiedGraphStageParityTests {
 
     func testConvolverFallbackCasesKeepTheKernel() throws {
         let rate = 48_000.0
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
-        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
+        let p = try prepare(kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
         var s = N60DSPGraphSnapshotMakeUnity(rate)
         select(&s, kind: .roomCorrection, slot: 0, p)
         XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(
@@ -1334,9 +1334,7 @@ extension UnifiedGraphStageParityTests {
     /// E6 S12f: refusals are named, and a room FIR with subwoofer lanes attaches.
     func testS12fNamedRefusalsAndRoomFIRWithSubwoofers() throws {
         let rate = 48_000.0
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
-        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
+        let p = try prepare(kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
         var s = N60DSPGraphSnapshotMakeUnity(rate)
         select(&s, kind: .roomCorrection, slot: 0, p)
         var delta = N60DSPGraphSnapshotMakeUnity(rate)
@@ -1353,15 +1351,15 @@ extension UnifiedGraphStageParityTests {
         }
     }
 
-    /// An IR change on the kernel ducks 8 ms and cuts to a cold runtime; the graph rebuilds with a fully warm filter
-    /// and a 20 ms equal-power crossfade. Both must settle on the new filter, and the graph must not click.
+    /// An IR change rebuilds the graph with a fully warm filter and a 20 ms equal-power crossfade. The output must settle
+    /// on the new filter (checked against a direct double-precision convolution of the input with the new taps, delayed by
+    /// the host latency) and must not click. Graph-only since E23 T1b: the kernel it was once compared with ducked 8 ms and
+    /// cut to a cold runtime, which is not behaviour the graph has.
     func testIRChangeSettlesOnTheNewFilterWithoutClicksAtEveryRate() throws {
         for rate in Self.rates {
-            let kernel = try XCTUnwrap(N60RenderKernelCreate())
-            defer { N60RenderKernelDestroy(kernel) }
-            let first = try prepare(kernel, kind: .roomCorrection, slot: 0,
+            let first = try prepare(kind: .roomCorrection, slot: 0,
                                     left: taps(count: 900, seed: 0.21), right: nil, declared: 0)
-            let second = try prepare(kernel, kind: .roomCorrection, slot: 1,
+            let second = try prepare(kind: .roomCorrection, slot: 1,
                                      left: taps(count: 1_300, seed: 0.55, scale: 0.8), right: nil, declared: 0)
             var s0 = N60DSPGraphSnapshotMakeUnity(rate)
             select(&s0, kind: .roomCorrection, slot: 0, first)
@@ -1370,11 +1368,6 @@ extension UnifiedGraphStageParityTests {
             let input = stimulus(rate: rate)
             let n = input[0].count
             let switchAt = n / 2 / 512 * 512
-            var ref: [[Float]] = [[Float](repeating: 0, count: n), [Float](repeating: 0, count: n)]
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s0))
-            runKernel(kernel, input, from: 0, to: switchAt, into: &ref)
-            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s1))
-            runKernel(kernel, input, from: switchAt, to: n, into: &ref)
 
             let all = [first, second]
             var g0 = s0, g1 = s1
@@ -1393,7 +1386,20 @@ extension UnifiedGraphStageParityTests {
                 got[0] += r[0]; got[1] += r[1]
                 position += 512
             }
-            checkParity(ref, got, tolerance: 0.02, "IR change rate \(rate)")
+            // Settled on the new filter: the final quarter equals the new taps convolved with the input.
+            let latency = Int(host.latencyFrames)
+            let taps = second.program.left
+            let from = n * 3 / 4
+            for lane in 0..<2 {
+                var worst = 0.0
+                for i in from..<n {
+                    var acc = 0.0
+                    let top = i - latency
+                    for k in 0..<taps.count where top - k >= 0 { acc += Double(taps[k]) * Double(input[lane][top - k]) }
+                    worst = max(worst, abs(acc - Double(got[lane][i])))
+                }
+                XCTAssertLessThan(worst, 2e-4, "IR change settled on the new filter, lane \(lane) rate \(rate)")
+            }
             // No click: the crossfade moves smoothly, so the largest step stays near the steady-state step.
             for lane in 0..<2 {
                 var steady: Float = 0, around: Float = 0
@@ -1406,36 +1412,42 @@ extension UnifiedGraphStageParityTests {
         }
     }
 
-    /// Hand-over: a kernel that was not rendering holds old audio in its convolver. Marking it idle restarts the
-    /// runtime from silence in O(block) work, so no ghost of that audio reaches the output.
-    func testIdleKernelConvolverRestartsFromSilence() throws {
+    /// A graph built for a hand-over holds no audio from before: the convolver of a fresh host starts from silence, so no
+    /// ghost of earlier audio reaches the output, and it renders normally afterwards. Graph-only since E23 T1b (the kernel
+    /// needed `N60RenderKernelMarkIdle` for this; the graph is rebuilt instead).
+    func testRebuiltConvolverStartsFromSilence() throws {
         let rate = 48_000.0
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
         var impulse = [Float](repeating: 0, count: 3_000)
         impulse[2_000] = 1
-        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: impulse, right: nil, declared: 0)
+        let p = try prepare(kind: .roomCorrection, slot: 0, left: impulse, right: nil, declared: 0)
         var s = N60DSPGraphSnapshotMakeUnity(rate)
         select(&s, kind: .roomCorrection, slot: 0, p)
-        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s))
-        let tone = tone(1_000, rate: rate, frames: 6_000, amplitude: 0.5)
-        let silence = [Float](repeating: 0, count: 6_000)
-        var out: [[Float]] = [[Float](repeating: 0, count: 6_000), [Float](repeating: 0, count: 6_000)]
-        runKernel(kernel, [tone, tone], from: 0, to: 6_000, into: &out)
-        N60RenderKernelMarkIdle(kernel)
-        runKernel(kernel, [silence, silence], from: 0, to: 6_000, into: &out)
-        XCTAssertLessThan(out[0].max() ?? 1, 1e-6)
-        XCTAssertLessThan(out[1].max() ?? 1, 1e-6)
-        // And it renders normally afterwards.
-        runKernel(kernel, [tone, tone], from: 0, to: 6_000, into: &out)
-        XCTAssertGreaterThan(out[0].map { abs($0) }.max() ?? 0, 0.1)
+        var snapshot = s
+        let configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &snapshot, sampleRate: rate, programs: lookup(.roomCorrection, [p])))
+        let tone = tone(1_000, rate: rate, frames: 6_144, amplitude: 0.5)
+        let silence = [Float](repeating: 0, count: 6_144)
+        func render(_ host: UnifiedGraphHost, _ lanes: [[Float]]) throws -> [[Float]] {
+            var out: [[Float]] = [[], []]
+            for position in stride(from: 0, to: lanes[0].count, by: 512) {
+                let r = try host.processOffline(input: lanes.map { Array($0[position..<position + 512]) }, frames: 512)
+                out[0] += r[0]; out[1] += r[1]
+            }
+            return out
+        }
+        let old = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        _ = try render(old, [tone, tone])
+        let fresh = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        let quiet = try render(fresh, [silence, silence])
+        XCTAssertLessThan(quiet[0].map { abs($0) }.max() ?? 1, 1e-6)
+        XCTAssertLessThan(quiet[1].map { abs($0) }.max() ?? 1, 1e-6)
+        let again = try render(fresh, [tone, tone])
+        XCTAssertGreaterThan(again[0].map { abs($0) }.max() ?? 0, 0.1)
     }
 
     func testUnchangedFIRKeepsItsStateAcrossAnUnrelatedRebuild() throws {
         let rate = 48_000.0
-        let kernel = try XCTUnwrap(N60RenderKernelCreate())
-        defer { N60RenderKernelDestroy(kernel) }
-        let p = try prepare(kernel, kind: .convolution, slot: 0, left: taps(count: 4_000, seed: 0.3), right: nil, declared: 0)
+        let p = try prepare(kind: .convolution, slot: 0, left: taps(count: 4_000, seed: 0.3), right: nil, declared: 0)
         var s = N60DSPGraphSnapshotMakeUnity(rate)
         select(&s, kind: .convolution, slot: 0, p)
         var a = s
