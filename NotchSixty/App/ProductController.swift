@@ -176,10 +176,8 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
-        self.roomTreatmentAdvisor =
-            RoomTreatmentAdvisorController(
-                store: roomProjects.store
-            )
+        let roomTreatmentAdvisor = RoomTreatmentAdvisorController(store: roomProjects.store)
+        self.roomTreatmentAdvisor = roomTreatmentAdvisor
         let ambientCompensation = AmbientCompensationController(
             engine: audioEngine,
             profiles: profiles,
@@ -215,6 +213,11 @@ final class ProductController: ObservableObject {
             calibration: calibration
         )
         self.feedForwardSurvey = feedForwardSurvey
+        if FeatureFlags().isEnabled(.roomModel) {
+            RoomModelLiveWiring.attach(
+                projects: roomProjects, advisor: roomTreatmentAdvisor, ambient: ambientCompensation, profiles: profiles,
+                engine: audioEngine, quietZone: activeQuietZone, survey: feedForwardSurvey)
+        }
         // E4 S28: the design survey's coherence turns the noise survey's reference predictions on.
         activeQuietZone.noiseSurvey?.attach(to: feedForwardSurvey)
         let feedForwardShadow = QuietZoneFeedForwardShadow()
@@ -318,10 +321,8 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
-        self.roomTreatmentAdvisor =
-            RoomTreatmentAdvisorController(
-                store: roomProjects.store
-            )
+        let roomTreatmentAdvisor = RoomTreatmentAdvisorController(store: roomProjects.store)
+        self.roomTreatmentAdvisor = roomTreatmentAdvisor
         let ambientCompensation = AmbientCompensationController(
             engine: audioEngine,
             profiles: profiles,
@@ -359,6 +360,11 @@ final class ProductController: ObservableObject {
             calibration: calibration
         )
         self.feedForwardSurvey = feedForwardSurvey
+        if FeatureFlags().isEnabled(.roomModel) {
+            RoomModelLiveWiring.attach(
+                projects: roomProjects, advisor: roomTreatmentAdvisor, ambient: ambientCompensation, profiles: profiles,
+                engine: audioEngine, quietZone: activeQuietZone, survey: feedForwardSurvey)
+        }
         activeQuietZone.noiseSurvey?.attach(to: feedForwardSurvey)
         let feedForwardShadow = QuietZoneFeedForwardShadow()
         // E4 S22b2: the drive is only ever requested while `e4.feedforward-live` is on.

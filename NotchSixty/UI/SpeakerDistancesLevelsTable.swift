@@ -47,6 +47,10 @@ struct SpeakerDistancesLevelsTable: View {
             measured: profiles.selectedSystemProfile?.state.calibrationRecord?.measuredFeeds)
     }
 
+    private var driverRows: [SpeakerDriverRow] {
+        SpeakerDriverTable.rows(routing: engine.speakerRoutingConfiguration)
+    }
+
     var body: some View {
         let rows = rows
         VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
@@ -58,10 +62,14 @@ struct SpeakerDistancesLevelsTable: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 100)
             }
-            if rows.isEmpty {
-                Text("Per-speaker distance, level and polarity are edited here for two-channel speaker pairs. "
-                    + "With more outputs, set them per driver in the routing matrix on the Speakers tab.")
+            if rows.isEmpty && driverRows.isEmpty {
+                Text("Per-speaker distance, level and polarity are edited here for two-channel speaker pairs and for "
+                    + "systems that use the routing matrix.")
                     .font(DesignType.caption.font).foregroundStyle(.secondary)
+            } else if rows.isEmpty {
+                Text("One row per driver. Distance is how far a driver's sound is delayed to arrive together with the others.")
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
+                ForEach(driverRows) { row in driverRowView(row) }
             } else {
                 Text("Distance is how far a speaker's sound is delayed to arrive together with the others. "
                     + "Values from the alignment are shown as measured; your own changes are marked.")
@@ -128,6 +136,47 @@ struct SpeakerDistancesLevelsTable: View {
             Button("Reset to measured") { run { try SpeakerFeedTableEditor.resetToMeasured(
                 side: row.side, engine: engine, profiles: profiles) } }
         }
+    }
+
+    private func driverRowView(_ row: SpeakerDriverRow) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.l.pt) { driverCells(row) }
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { driverCells(row) }
+        }
+    }
+
+    @ViewBuilder
+    private func driverCells(_ row: SpeakerDriverRow) -> some View {
+        Text(row.title).font(DesignType.label.font.bold()).frame(width: 140, alignment: .leading)
+        LabeledContent("Distance") {
+            HStack(spacing: 6) {
+                TextField("Distance", value: Binding(
+                    get: { SpeakerFeedTable.distance(delayMs: row.delayMs, unit: unit) },
+                    set: { value in
+                        let ms = SpeakerFeedTable.delayMs(distance: value, unit: unit)
+                        run { try SpeakerDriverTableEditor.edit(way: row.id, engine: engine, profiles: profiles) { $0.delayMs = ms } }
+                    }), format: .number.precision(.fractionLength(2)))
+                    .frame(width: 70).multilineTextAlignment(.trailing)
+                Text(unit.title)
+                Text("(\(row.delayMs, specifier: "%.2f") ms)").foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        LabeledContent("Level") {
+            HStack(spacing: 6) {
+                TextField("Level", value: Binding(
+                    get: { row.trimDB },
+                    set: { value in
+                        run { try SpeakerDriverTableEditor.edit(way: row.id, engine: engine, profiles: profiles) { $0.trimDB = value } }
+                    }), format: .number.precision(.fractionLength(1)))
+                    .frame(width: 60).multilineTextAlignment(.trailing)
+                Text("dB")
+            }
+        }
+        Toggle("Invert polarity", isOn: Binding(
+            get: { row.polarityInverted },
+            set: { value in
+                run { try SpeakerDriverTableEditor.edit(way: row.id, engine: engine, profiles: profiles) { $0.polarityInverted = value } }
+            }))
     }
 
     private func run(_ action: () throws -> Void) {

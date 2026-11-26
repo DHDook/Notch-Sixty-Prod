@@ -373,7 +373,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [~] S13 `e12/menu-bar-remote` (owns G9, G12): the menu bar panel becomes the remote: volume, mute, balance, output, profile, slots for the E30 controls, level-matched before/after; a toolbar popover hosts the same panel when the menu bar item is off. Partly built (PR #652): the panel, toolbar popover, keyboard and VoiceOver and G72 are done; the level-matched before/after button (G9) built in S27 (PR #662)
 - [x] S14 `e12/live-output-switch` (needs-owner: Core Audio control; owns G10): change output while audio runs through a fade and restart; graduates `e12.dashboard-remote`
 - [~] S15 `e12/system-overview` (built dark behind `e12.system-pages`, #707; wired and graduated by S18; G91, G92 scoped) (owner, 16 Nov 2026; owns G14, G15, G20): the Overview shows "verified" correctly (defect) and becomes the system checklist with states, dates, next step and an out-of-date notice
-- [ ] S16 `e12/speakers-page` (needs-owner: removes a user-visible control; owns G16–G18): one owner of bass management shown at a time; the older Crossover Design and Sub Phase Alignment cards retired after a same-sound migration (owner approved 16 Nov 2026); arrangement editor on the Speakers tab; distances and levels table
+- [x] S16 `e12/speakers-page` (built dark: #733 and S16b; needs-owner: removes a user-visible control; owns G16–G18): one owner of bass management shown at a time; the older Crossover Design and Sub Phase Alignment cards retired after a same-sound migration (owner approved 16 Nov 2026); arrangement editor on the Speakers tab; distances and levels table
 - [x] S17 `e12/calibration-summary` (owns G20 summary part): a readable calibration summary with before and after per seat, print and PDF (behind `e12.system-pages`; System > Overview > Calibration summary)
 - [ ] S18 `e12/one-measure-surface` (after E29; owns G19): the Measure tab is the one place to capture, Alignment and Bass and correction use its measurements, plain wording, one Export menu; graduates `e12.system-pages`
     - [ ] G89: reuse S30's `SystemSetupGraphView` and `SystemSetupGraphBuilder` for the Measure page graphs instead of a second graph
@@ -709,7 +709,7 @@ unified graph only.
 - [x] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h); K1 `e23/kernel-off-render-path` (E23 G22)
 - [ ] T1 `e23/kernel-tests-xctest` and T2 `e23/kernel-tests-harnesses`: migrate or retire every kernel-referencing XCTest and C harness (graph-only, frozen corpus or retire; E23 G21)
-- [ ] S4 part 4 `e23/s4-part4-setter-protection`: restore setter protection on the 63 relaxed properties and move the keyboard volume region, after E16 S2 (E23 G20)
+- [x] S4 part 4 `e23/s4-part4-setter-protection`: restore setter protection on the 63 relaxed properties and move the keyboard volume region, after E16 S2 (E23 G20)
 - [x] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 43 files (not 17) that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
 - [x] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner): deleted `ContentView.swift` and its debug tab; controls with no production home are in E23 G17 (S9)
 - [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
@@ -723,6 +723,7 @@ unified graph only.
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag: flag in K1, stereo kernel in K2 (closes E23 G8), N-channel path in K3
 - [ ] With the kernel: delete the bridge per-frame output loop (E20 G8), the hand-set flush-to-zero in `N60OutputIOProc` (E20 G9), and the trusted legacy `nonblocking` declarations (E20 G44); K2
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21; K3
+- [ ] Enforce the publish-then-commit order for the configuration setters (E23 G23; the commit mutators store only); K3
 
 ### E22 Hardware validation
 

@@ -10,6 +10,10 @@ import Foundation
 @Observable
 final class RoomTreatmentAdvisorController {
     let store: RoomCorrectionProjectStore
+    /// E29 S7 (`e29.room-model`): the seat chosen for Conversation Focus, shared with the ambient controller.
+    let seatMusicFeed = SeatMusicFeed()
+    /// E29 S7: live output, arrangement, gain, ANC path and head-survey facts for the seat map. Set at app construction.
+    @ObservationIgnored var roomModelLive: (() -> RoomModelLiveInputs)?
     let geometryStore: RoomGeometryStore
     let advancedPlacementStore: RoomAdvancedPlacementStore
     let placementReviewStore: RoomAdvancedPlacementReviewStore

@@ -29,7 +29,7 @@ extension AudioIOEngine {
 
     func setAnalyserTapsInstalled(_ installed: Bool) {
         guard installed != analyserTapsInstalled else { return }
-        analyserTapsInstalled = installed
+        speakerDrive.setAnalyserTapsInstalled(installed)
         transportSession?.setAnalyserTapsInstalled(installed)
     }
 
@@ -94,13 +94,13 @@ extension AudioIOEngine {
     }
 
     func setSpeakerDriveDemand(_ requested: Bool) {
-        speakerDriveDemandMux.shadow = requested
+        speakerDrive.setShadowDemand(requested)
         applySpeakerDriveDemand()
     }
 
     /// E4 S25 follow-up: the live reference pump needs the output anchors.
     func setPumpDriveDemand(_ requested: Bool) {
-        speakerDriveDemandMux.pump = requested
+        speakerDrive.setPumpDemand(requested)
         applySpeakerDriveDemand()
     }
 
@@ -164,8 +164,7 @@ extension AudioIOEngine {
     /// The anchor ring has one consumer; the shadow and the live reference pump each get every anchor
     /// through this fan-out.
     func pullSpeakerDriveAnchors(for consumer: SpeakerDriveAnchorFanout.Consumer) -> [N60SpeakerDriveAnchor] {
-        speakerDriveAnchorFanout.ingest(readSpeakerDriveAnchors())
-        return speakerDriveAnchorFanout.drain(consumer)
+        speakerDrive.pull(readSpeakerDriveAnchors(), for: consumer)
     }
 
     func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {

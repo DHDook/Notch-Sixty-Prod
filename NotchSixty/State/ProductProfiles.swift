@@ -2901,6 +2901,9 @@ struct RoomCorrectionMeasurementPosition: Identifiable, Codable, Equatable, Send
     /// E26 S7b2 (G17): the output gain (volume plus headroom, dB) when the path was measured. Nil for older records,
     /// which skip the device-volume check. Optional, so stored projects decode unchanged.
     var outputGainDBAtMeasurement: Double? = nil
+    /// E29 S7: output device, arrangement revision and timing when the position was retained (under `e29.room-model`).
+    /// Nil for older positions, which skip those staleness checks. Optional, so stored projects decode unchanged.
+    var captureStamp: RoomCaptureStamp? = nil
 }
 
 struct RoomCorrectionAggregateResponse: Codable, Equatable, Sendable {
