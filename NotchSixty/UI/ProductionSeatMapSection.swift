@@ -12,7 +12,8 @@ struct ProductionSeatMapSection: View {
     init(advisor: RoomTreatmentAdvisorController, stereoAlignment: StereoBassAlignment? = nil) {
         self.advisor = advisor
         self.stereoAlignment = stereoAlignment
-        _map = State(initialValue: RoomSeatMapController(projectStore: advisor.store))
+        _map = State(initialValue: RoomSeatMapController(
+            projectStore: advisor.store, seatMusicFeed: advisor.seatMusicFeed))
     }
 
     var body: some View {
@@ -65,7 +66,9 @@ struct ProductionSeatMapSection: View {
         context.calibrationName = project.microphone?.calibration?.sourceName
         map.stereoAlignment = stereoAlignment
         let library = (try? MeasurementLibrary(root: MeasurementLibrary.defaultRoot()).load().records) ?? []
-        map.load(project: project, geometry: advisor.geometryDraft, context: context, library: library)
+        map.load(
+            project: project, geometry: advisor.geometryDraft, context: context, library: library,
+            live: advisor.roomModelLive?())
     }
 
     private var header: some View {
@@ -208,11 +211,29 @@ struct ProductionSeatMapSection: View {
                 coordinateField("Height", value: (pos?.z ?? 0) * k) { commit(point, x: nil, y: nil, z: $0 / k) }
             }
             locateRow(point)
+            focusRow(point)
             HStack {
                 Button("Remove position") { map.clearPosition(point.id) }
                     .disabled(pos == nil || map.linkedPointIDs.contains(point.id))
                 if map.linkedPointIDs.contains(point.id) {
                     Text("Follows the room geometry.").font(DesignType.caption.font).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// "Use for Conversation Focus" (E29 S7): the music estimate in Conversation Focus is taken at this seat, with a
+    /// fallback to the microphone's own estimate when the seat has no measurement, is stale or has low confidence.
+    @ViewBuilder
+    private func focusRow(_ point: RoomPoint) -> some View {
+        if point.kind == .seat {
+            let chosen = map.focusSeatID == point.id
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Use this seat for Conversation Focus", isOn: Binding(
+                    get: { chosen }, set: { map.setFocusSeat($0 ? point.id : nil) }))
+                    .accessibilityHint("Conversation Focus predicts the music at this seat instead of at the microphone.")
+                if chosen, let text = map.focusMessage {
+                    Text(text).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }

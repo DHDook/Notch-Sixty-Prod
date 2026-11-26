@@ -368,6 +368,8 @@ final class RoomCorrectionProjectController: ObservableObject {
     /// E26 (G17): supplies the output gain (volume plus headroom, dB) at the moment a position is retained, so Quiet
     /// Zone can refuse a design measured at a different volume. Nil leaves the position unstamped (older behaviour).
     var outputGainStamp: (() -> Double?)?
+    /// E29 S7 (`e29.room-model`): output device, arrangement revision and timing to stamp on a retained position.
+    var captureStamp: (() -> RoomCaptureStamp?)?
 
     @discardableResult
     func retainMeasurement(
@@ -408,7 +410,8 @@ final class RoomCorrectionProjectController: ObservableObject {
             left: analysis.left,
             right: analysis.right,
             ancBassFingerprint: ancBassFingerprint ?? ancBassStamp?(),
-            outputGainDBAtMeasurement: outputGainStamp?()
+            outputGainDBAtMeasurement: outputGainStamp?(),
+            captureStamp: captureStamp?()
         )
         updated.measurements.append(position)
         updated.modifiedAt = retainedAt
