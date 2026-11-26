@@ -35,7 +35,7 @@ final class LiveSessionFixtureTests: XCTestCase {
     }
 
     /// An engine in `.running` with a graph-rendered 5.1 session, or one rendered by the legacy core.
-    private func makeEngine(rate: Double, bass: Bool, graph: Bool = true, flag: Bool = true) throws
+    private func makeEngine(rate: Double, bass: Bool, graph: Bool = true) throws
         -> (AudioIOEngine, CoreAudioNChannelTransportSession) {
         let plan = routePlan(bass: bass)
         let bassConfiguration = bass ? bassOn : BassManagementConfiguration()
@@ -56,7 +56,6 @@ final class LiveSessionFixtureTests: XCTestCase {
             testingSelectedOutput: device(rate), routePlan: plan, renderGraph: renderGraph, inputMap: inputMap,
             sampleRate: rate, unifiedGraphConfiguration: configuration)
         let engine = AudioIOEngine()
-        engine.unifiedGraphEnabled = flag
         if bass { try engine.replaceBassManagementConfiguration(bassOn) }
         try engine.installTestingNChannelSession(session)
         return (engine, session)
@@ -105,21 +104,10 @@ final class LiveSessionFixtureTests: XCTestCase {
         engine.removeTestingNChannelSession()
     }
 
-    func testFlagOffAndLegacySessionsStayRestartOnly() throws {
+    func testASessionWithoutAGraphStaysRestartOnly() throws {
         let rate = 48_000.0
         var changed = bassOn
         changed.frequencyHz += 20
-
-        let (flagOff, offSession) = try makeEngine(rate: rate, bass: true, flag: false)
-        XCTAssertFalse(flagOff.liveGraphEditsAvailable)
-        XCTAssertThrowsError(try flagOff.replaceBassManagementConfiguration(changed)) {
-            guard case LiveNChannelTransportError.configurationChangeRequiresRestart = $0 else {
-                return XCTFail("wrong error \($0)")
-            }
-        }
-        XCTAssertEqual(flagOff.bassManagementConfiguration, bassOn)
-        flagOff.removeTestingNChannelSession()
-        _ = offSession
 
         let (legacy, legacySession) = try makeEngine(rate: rate, bass: true, graph: false)
         XCTAssertFalse(legacySession.unifiedGraphActive)
@@ -127,6 +115,37 @@ final class LiveSessionFixtureTests: XCTestCase {
         XCTAssertThrowsError(try legacy.replaceBassManagementConfiguration(changed))
         XCTAssertEqual(legacy.bassManagementConfiguration, bassOn)
         legacy.removeTestingNChannelSession()
+    }
+
+    /// E23 K1: a graph the core refuses ends the start with the named reason; there is no unprocessed fallback.
+    func testRefusedGraphFailsTheSessionStartWithTheNamedReasonAtEveryRate() throws {
+        for rate in Self.rates {
+            let plan = routePlan(bass: false)
+            let renderGraph = try LiveNChannelRenderGraphCompiler.makeGraph(
+                routePlan: plan, sampleRate: rate, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration())
+            let descriptions = Self.labels.map {
+                AudioChannelDescription(mChannelLabel: $0, mChannelFlags: [], mCoordinates: (0, 0, 0))
+            }
+            var inputMap = N60ProgramInputMap()
+            XCTAssertTrue(descriptions.withUnsafeBufferPointer {
+                N60ProgramInputMapCompile($0.baseAddress!, UInt32($0.count), renderGraph.programLayout, &inputMap)
+            })
+            // A configuration built for another rate is refused by name.
+            let wrongRate = rate == 48_000 ? 96_000.0 : 48_000.0
+            let configuration = UnifiedGraphTranslator.nChannelConfiguration(
+                routePlan: plan, sampleRate: wrongRate, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration())
+            XCTAssertThrowsError(try CoreAudioNChannelTransportSession(
+                testingSelectedOutput: device(rate), routePlan: plan, renderGraph: renderGraph,
+                inputMap: inputMap, sampleRate: rate, unifiedGraphConfiguration: configuration)
+            ) {
+                guard case LiveNChannelTransportError.unifiedGraphRejected(let reason) = $0 else {
+                    return XCTFail("wrong error \($0) at \(rate)")
+                }
+                XCTAssertEqual(reason, .sampleRateMismatch, "at \(rate)")
+            }
+        }
     }
 
     func testBassEnabledToggleStillRestartsEvenWhenGraphIsLive() throws {

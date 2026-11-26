@@ -29,14 +29,9 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     /// E8 S4: the routing matrix cannot run on this session, with the reason (legacy kernel, flag off, a sub source
     /// with bass management off, a routing the compiler rejects).
     case routingRefused(String)
-    /// E8 A3: the profile has 5 to 8 subwoofers and the session would run on the legacy render kernel, which drives
-    /// at most 4. Nothing is truncated; the stored profile is kept.
-    case tooManySubwoofersForLegacyKernel(Int)
 
     var errorDescription: String? {
         switch self {
-        case .tooManySubwoofersForLegacyKernel(let count):
-            return "The legacy render kernel drives at most \(SubwooferLimit.legacyKernel) subwoofers; this profile has \(count). Turn on the unified graph to use more."
         case .routingRefused(let reason):
             return "The routing matrix cannot start: \(reason)"
         case .incompatibleProgramChannelCount(let tap, let profile):
@@ -177,9 +172,8 @@ enum LiveNChannelRenderGraphCompiler {
         // is the graph's, so the legacy snapshot is never built for it.
         var bassManagementConfiguration = bassManagementConfiguration
         if routePlan.isRouted { bassManagementConfiguration.enabled = false }
-        // E8 A3: 5 to 8 subs are graph-only. The legacy bass-management snapshot holds at most 4, so it is not built;
-        // the session requires the graph (the engine refuses the legacy kernel by name before this point).
-        if Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel { bassManagementConfiguration.enabled = false }
+        // E8 A3: 5 to 8 subs are graph-only. The fixed-map bass-management snapshot holds at most 4, so it is not built.
+        if Int(routePlan.subwooferCount) > SubwooferLimit.fixedMapSlots { bassManagementConfiguration.enabled = false }
         let layout = routePlan.programLayout.realtimeLayout
         var lanes = N60ProgramLaneGraphSnapshotMakeUnity(sampleRate, layout)
 
@@ -404,9 +398,6 @@ final class CoreAudioNChannelTransportSession {
     /// rebuild crossfade uses the linear law. Every other republish keeps the equal-power law.
     var linearFadeForEQRepublish = false
     private var unifiedGraphHost: UnifiedGraphHost?
-    /// Why the legacy render core kept this session although the graph was requested; nil when
-    /// the graph renders it or was not requested.
-    private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private let captureSource = ProcessTapCaptureSource()
     /// E36 S3b: set when the driver path is chosen; then there is no tap, no aggregate and no capture IOProc.
@@ -454,8 +445,6 @@ final class CoreAudioNChannelTransportSession {
         roomTreatment: LiveMIMORoomTreatmentPreparation? = nil,
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
         unifiedGraphConfiguration: UnifiedGraphConfiguration? = nil,
-        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil,
-        unifiedGraphRequired: Bool = false,
         ancFeedSplitter: N60SpeakerBusSplitterSnapshot? = nil
     ) throws {
         self.selectedOutput = selectedOutput
@@ -712,36 +701,28 @@ final class CoreAudioNChannelTransportSession {
                     true
                 )
             }
-            // Any reason the core cannot take the session leaves the legacy render core in place,
-            // and is recorded so diagnostics can say why.
-            if let configuration = unifiedGraphConfiguration {
-                switch Self.makeUnifiedGraph(
-                    configuration: configuration,
-                    bridge: newBridge,
-                    sampleRate: outputFormat.sampleRate,
-                    laneCount: Int(renderGraph.programLayout.channelCount),
-                    outputBufferFrames: outputBufferFrames,
-                    ancFeedSplitter: ancFeedSplitter
-                ) {
-                case .success(let host):
-                    unifiedGraphHost = host
-                    hostedAnc = configuration.ancActuators?.hostFed == true ? configuration.ancActuators : nil
-                    hostedConfiguration = hostedAnc == nil ? nil : configuration
-                    mimoStage = configuration.mimo
-                    lastGraphConfiguration = configuration
-                case .failure(let reason):
-                    if unifiedGraphRequired {
-                        N60LiveNChannelBridgeDestroy(newBridge)
-                        throw LiveNChannelTransportError.unifiedGraphRejected(reason)
-                    }
-                    unifiedGraphFallbackReason = reason
-                }
-            } else {
-                if unifiedGraphRequired {
-                    N60LiveNChannelBridgeDestroy(newBridge)
-                    throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphIneligibility ?? .specRejected)
-                }
-                unifiedGraphFallbackReason = unifiedGraphIneligibility
+            // The graph is the only render path (E23 K1): a session the core cannot take fails the start by name.
+            guard let configuration = unifiedGraphConfiguration else {
+                N60LiveNChannelBridgeDestroy(newBridge)
+                throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+            }
+            switch Self.makeUnifiedGraph(
+                configuration: configuration,
+                bridge: newBridge,
+                sampleRate: outputFormat.sampleRate,
+                laneCount: Int(renderGraph.programLayout.channelCount),
+                outputBufferFrames: outputBufferFrames,
+                ancFeedSplitter: ancFeedSplitter
+            ) {
+            case .success(let host):
+                unifiedGraphHost = host
+                hostedAnc = configuration.ancActuators?.hostFed == true ? configuration.ancActuators : nil
+                hostedConfiguration = hostedAnc == nil ? nil : configuration
+                mimoStage = configuration.mimo
+                lastGraphConfiguration = configuration
+            case .failure(let reason):
+                N60LiveNChannelBridgeDestroy(newBridge)
+                throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
             bridge = newBridge
             installLoudnessWorker(newBridge, sampleRate: outputFormat.sampleRate)
@@ -897,7 +878,9 @@ final class CoreAudioNChannelTransportSession {
                 hostedConfiguration = hostedAnc == nil ? nil : configuration
                 mimoStage = configuration.mimo
                 lastGraphConfiguration = configuration
-            case .failure(let reason): unifiedGraphFallbackReason = reason
+            case .failure(let reason):
+                N60LiveNChannelBridgeDestroy(newBridge)
+                throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
         }
         bridge = newBridge

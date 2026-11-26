@@ -78,8 +78,6 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     private let graphReferenceLock = NSLock()
     /// Head poses the graph refused (single-orientation stage, full mailbox); guarded by `graphReferenceLock`.
     private(set) var headPosePostFailures: UInt64 = 0
-    /// Why the legacy binaural pipeline kept this session although the graph was requested.
-    private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     /// E6 S9b: the graph before any program DSP, kept so a live edit re-lays the program DSP and gain without
     /// rebuilding the response set.
     private(set) var unifiedGraphBaseSpec: UnifiedGraphSpec?
@@ -105,9 +103,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         outputGain: Float,
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
         unifiedGraphSpec: UnifiedGraphSpec? = nil,
-        unifiedGraphBaseSpec baseSpec: UnifiedGraphSpec? = nil,
-        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil,
-        unifiedGraphRequired: Bool = false
+        unifiedGraphBaseSpec baseSpec: UnifiedGraphSpec? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.programSource = programSource
@@ -275,38 +271,28 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                     throw CoreAudioTransportError.audioUnitRackConfigurationFailed
                 }
             }
-            // E6 S9a: with stereo-class DSP active the session never falls back to the legacy pipeline.
-            func rejectIfRequired(_ reason: UnifiedGraphFallbackReason) throws {
-                guard unifiedGraphRequired else { return }
+            // The graph is the only render path (E23 K1): a refusal fails the start by name.
+            func rejection(_ reason: UnifiedGraphFallbackReason) -> Error {
                 N60BinauralHeadphoneBridgeDestroy(newBridge)
-                throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+                return LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
-            if let spec = unifiedGraphSpec {
-                if audioUnitRack != nil {
-                    try rejectIfRequired(.unsupportedRoute)
-                    unifiedGraphFallbackReason = .unsupportedRoute
-                } else {
-                    switch Self.makeUnifiedGraph(
-                        spec: spec,
-                        bridge: newBridge,
-                        sampleRate: outputFormat.sampleRate,
-                        laneCount: programLayout.roles.count,
-                        outputBufferFrames: outputBufferFrames
-                    ) {
-                    case .success(let host):
-                        unifiedGraphHost = host
-                        unifiedGraphBaseSpec = baseSpec
-                        // The graph's INPUT_GAIN stage carries the program gain from here on, so it can follow
-                        // live edits; the bridge must not apply it a second time.
-                        newBridge.pointee.programGainLinear = 1
-                    case .failure(let reason):
-                        try rejectIfRequired(reason)
-                        unifiedGraphFallbackReason = reason
-                    }
-                }
-            } else {
-                try rejectIfRequired(unifiedGraphIneligibility ?? .specRejected)
-                unifiedGraphFallbackReason = unifiedGraphIneligibility
+            guard let spec = unifiedGraphSpec else { throw rejection(.specRejected) }
+            if audioUnitRack != nil { throw rejection(.unsupportedRoute) }
+            switch Self.makeUnifiedGraph(
+                spec: spec,
+                bridge: newBridge,
+                sampleRate: outputFormat.sampleRate,
+                laneCount: programLayout.roles.count,
+                outputBufferFrames: outputBufferFrames
+            ) {
+            case .success(let host):
+                unifiedGraphHost = host
+                unifiedGraphBaseSpec = baseSpec
+                // The graph's INPUT_GAIN stage carries the program gain from here on, so it can follow
+                // live edits; the bridge must not apply it a second time.
+                newBridge.pointee.programGainLinear = 1
+            case .failure(let reason):
+                throw rejection(reason)
             }
             bridge = newBridge
             installLoudnessWorker(newBridge, sampleRate: outputFormat.sampleRate)

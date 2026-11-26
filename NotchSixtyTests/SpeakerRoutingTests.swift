@@ -327,7 +327,6 @@ extension SpeakerRoutingTests {
 
     private func engineReady(subs: Bool) throws -> AudioIOEngine {
         let engine = AudioIOEngine()
-        engine.unifiedGraphEnabled = true
         if subs { try engine.replaceBassManagementConfiguration(bassOn) }
         return engine
     }
@@ -357,7 +356,7 @@ extension SpeakerRoutingTests {
         let session = try CoreAudioNChannelTransportSession(
             testingSelectedOutput: device, routePlan: plan, renderGraph: renderGraph, inputMap: inputMap,
             sampleRate: rate, unifiedGraphConfiguration: configuration)
-        XCTAssertNil(session.unifiedGraphFallbackReason, "graph fallback")
+        XCTAssertTrue(session.unifiedGraphActive, "the graph renders the session")
         try engine.installTestingNChannelSession(session)
         let host = try XCTUnwrap(session.unifiedGraphReadback)
         return (session, plan, host)
@@ -592,19 +591,9 @@ extension SpeakerRoutingTests {
 
         // nil and a disabled routing are accepted and stereo is untouched.
         let off = AudioIOEngine()
-        off.unifiedGraphEnabled = true
         XCTAssertNoThrow(try off.replaceSpeakerRoutingConfiguration(nil))
         XCTAssertNoThrow(try off.replaceSpeakerRoutingConfiguration(disabled))
         XCTAssertEqual(off.speakerRoutingConfiguration, disabled)
-
-        // Legacy kernel selected.
-        let legacy = AudioIOEngine()
-        legacy.unifiedGraphEnabled = false
-        XCTAssertThrowsError(try legacy.replaceSpeakerRoutingConfiguration(routing)) {
-            guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
-            XCTAssertTrue(reason.contains("legacy render kernel"))
-        }
-        XCTAssertNil(legacy.speakerRoutingConfiguration)
 
         // Sub sources need bass management, and bass management needs sub sources.
         let engine = try engineReady(subs: false)

@@ -146,17 +146,20 @@ final class SystemArrangementTests: XCTestCase {
         XCTAssertNotNil(issue.errorDescription)
     }
 
-    func testLegacyKernelRefusesWhatItCannotRunWithAReason() {
-        XCTAssertNil(StereoBassAlignment().legacyKernelRefusal)
-        XCTAssertNil(StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 48)).legacyKernelRefusal)
+    /// E23 K1: the kernel and its refusals are gone. Every valid alignment is accepted (the graph renders it); only an
+    /// out-of-range value is refused, and the standard form is the Linkwitz-Riley 24 or 48 filter with identity feeds.
+    func testEveryValidAlignmentIsAcceptedAndStandardMeansTheDefaultFilterWithIdentityFeeds() {
+        XCTAssertNil(StereoBassAlignment().issue)
+        XCTAssertTrue(StereoBassAlignment().isStandard)
+        XCTAssertTrue(StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 48)).isStandard)
         let bessel = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 24))
-        XCTAssertEqual(bessel.legacyKernelRefusal, .legacyKernelFilter)
-        XCTAssertEqual(StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 12)).legacyKernelRefusal,
-                       .legacyKernelFilter)
+        XCTAssertNil(bessel.issue)
+        XCTAssertFalse(bessel.isStandard)
+        XCTAssertNil(StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 12)).issue)
         var trimmed = StereoBassAlignment()
         trimmed.left.polarityInverted = true
-        XCTAssertEqual(trimmed.legacyKernelRefusal, .legacyKernelCalibration)
-        XCTAssertTrue(bessel.legacyKernelRefusal?.errorDescription?.contains("e6.legacy-kernel") ?? false)
+        XCTAssertNil(trimmed.issue)
+        XCTAssertFalse(trimmed.isStandard)
     }
 
     func testAlignmentRoundTripsAndOldArrangementsDecodeWithout() throws {

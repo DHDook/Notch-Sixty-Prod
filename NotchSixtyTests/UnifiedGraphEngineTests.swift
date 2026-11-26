@@ -95,7 +95,6 @@ final class UnifiedGraphEngineTests: XCTestCase {
     }
 
     func testBridgeWithoutAGraphLeavesTheKernelPathAlone() throws {
-        XCTAssertFalse(FeatureFlag.legacyKernel.defaultEnabled)
         let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(4_096))
         defer { N60RealtimeAudioBridgeDestroy(bridge) }
         XCTAssertFalse(N60RealtimeAudioBridgeUnifiedGraphActive(bridge))

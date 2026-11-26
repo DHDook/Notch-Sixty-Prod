@@ -306,10 +306,10 @@ final class LiveHeadphoneProfileTests: XCTestCase {
     // MARK: engine decision (what the running engine does with a change)
 
     private func context(
-        flag: Bool = true, running: Bool = true, session: HeadphoneLiveEditPlanner.BinauralSession = .graph,
+        running: Bool = true, session: HeadphoneLiveEditPlanner.BinauralSession = .graph,
         nChannel: Bool = false
     ) -> HeadphoneLiveEditPlanner.Context {
-        .init(unifiedGraphEnabled: flag, lifecycleRunning: running, binauralSession: session, nChannelSessionActive: nChannel)
+        .init(lifecycleRunning: running, binauralSession: session, nChannelSessionActive: nChannel)
     }
 
     func testPlannerDecisions() {
@@ -318,7 +318,7 @@ final class LiveHeadphoneProfileTests: XCTestCase {
         func plan(_ new: HeadphoneDeviceProfileConfiguration?, _ ctx: HeadphoneLiveEditPlanner.Context)
             -> HeadphoneLiveEditPlan { HeadphoneLiveEditPlanner.plan(from: old, to: new, context: ctx) }
 
-        XCTAssertEqual(plan(old, context(flag: false)), .unchanged)
+        XCTAssertEqual(plan(old, context()), .unchanged)
         var eq = old; eq.left.gainDB = -2; eq.name = "Renamed"; eq.crossfeed.amount = 0.4
         XCTAssertEqual(plan(eq, context()), .liveEdit(assetChanged: false))
         var asset = old; asset.binauralProfile = BinauralProfileAsset.validationStereo().reference
@@ -333,17 +333,13 @@ final class LiveHeadphoneProfileTests: XCTestCase {
         var tracked = old; tracked.headTracking = HeadTrackingConfiguration()
         XCTAssertEqual(plan(tracked, context()), .reconfigure)
 
-        // Nothing changes while the flag is off, the session is not running or it is not on the graph.
-        XCTAssertEqual(plan(eq, context(flag: false)), .refuse)
+        // Nothing changes while the session is not running or an N-channel session is active.
         XCTAssertEqual(plan(eq, context(running: false)), .refuse)
-        XCTAssertEqual(plan(eq, context(session: .legacy)), .refuse)
         XCTAssertEqual(plan(eq, context(nChannel: true)), .refuse)
-        XCTAssertEqual(plan(nil, context(session: .legacy)), .refuse)
 
         // From no headphone session, turning a profile on reconfigures.
         XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: old, context: context(session: .none)), .reconfigure)
         // A stereo profile from no headphone session is a session-kind change too (E6 S9d).
         XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: stereo, context: context(session: .none)), .reconfigure)
-        XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: old, context: context(flag: false, session: .none)), .refuse)
     }
 }

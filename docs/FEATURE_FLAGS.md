@@ -75,7 +75,6 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 
 | flag | epic | status | graduated-since | cleanup owner |
 | --- | --- | --- | --- | --- |
-| `e6.legacy-kernel` | E6 | dark (inverse escape hatch; never graduates) | n/a | E23 |
 | `e4.engine-lease` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
 | `e4.adaptive-tonal-live` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
 | `e4.earned-cap` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
@@ -133,7 +132,6 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 | E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Graduated 11 Nov 2026 (S32): Turn On available, never armed | none |
 | E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Graduated 11 Nov 2026 (S32) | none |
 | E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Graduated 11 Nov 2026 (G16): ear survey, camera follow and zone chooser wired, adaptive worker uses the ear error (G18); available, never armed | none |
-| E6 | `e6.legacy-kernel` | Software complete bar S12h part 3; the inverse escape hatch | Never graduates; E23 deletes it; scoped gaps owned by E22 and E23 |
 | E7 | `e7.rate-adapt` | Graduated in S5 (15 Nov 2026): S1 and S4 ship without a flag; S2 asset resampling and S3 per-rate plug-in bypass read it; bench lines move to E22 | none; flag removal is FC (E7) |
 | E9 | `e9.long-fir`, `e9.output-protection` | Graduated in S8 (13 Nov 2026); Outputs UI, headroom assistant, active-speaker failsafe and the 262,144-tap program FIR reachable | Bench gaps G18, G25, G26, G27 and the S1 to S10b bench lines move to E22; flag removal is FC (E9) |
 | E13 | `e13.headphones` | S3, S4, S7 reachable behind the flag; S5 not built | S5; software gaps G7, G9, G10, G12; bench gaps G2 to G6, G8, G11 move to E22; S8 reworded |
@@ -156,7 +154,6 @@ E22; the software part graduates.
 
 | id | epic | gates |
 | --- | --- | --- |
-| `e6.legacy-kernel` | E6 | Selects the frozen legacy render kernel (E23 deletes it) |
 | `e4.adaptive-tonal-live` | E4 | Live adaptive tonal canceller and the supervised microphone-move re-solve; still needs the per-feature arm switch (S18b) |
 | `e4.earned-cap` | E4 | Anti-noise cap earned in 3 dB steps from -40 to -18 dBFS per binding (S20); needs `e4.adaptive-tonal-live` |
 | `e4.feedforward-live` | E4 | Live feed-forward cancellation (S22); S22b1 gates only the speaker-drive recording for the echo model; off means nothing sets the demand |

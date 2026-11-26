@@ -9,7 +9,6 @@ import Foundation
 /// - True-peak factor (R12): the smallest of 1x, 2x, 4x with rate x factor at least 176.4 kHz, instead of a fixed 4x. The core
 ///   and the Swift latency totals use the same rule, so the reported latency follows it.
 ///
-/// The frozen kernel (`e6.legacy-kernel`) keeps its fixed 4x, so the fixes are off while it is selected.
 enum DynamicsSoundFixes {
     /// Bits of the PROTECTION stage's trailing sound-fixes word (graph ABI v43).
     static let attackCapBit: Float = 1
@@ -17,7 +16,7 @@ enum DynamicsSoundFixes {
     static let protectionWord: Float = attackCapBit + rateFactorBit
 
     nonisolated static var isEnabled: Bool {
-        FeatureFlags.isEnabledProcessWide(.dynamicsSound) && !FeatureFlags.isEnabledProcessWide(.legacyKernel)
+        FeatureFlags.isEnabledProcessWide(.dynamicsSound)
     }
 
     /// The true-peak oversampling factor at `sampleRate` when the limiter and the guard are both on.

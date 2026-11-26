@@ -76,20 +76,14 @@ final class DynamicsExtrasS7dTests: XCTestCase {
     }
 
     func testAvailabilityReasons() {
-        let off = DynamicsExtrasAvailability(flagOn: false, kernelRenders: false, running: true)
+        let off = DynamicsExtrasAvailability(flagOn: false, running: true)
         XCTAssertNil(off.extrasDisabledReason)
         XCTAssertFalse(off.bypassEnabled)
-        let kernel = DynamicsExtrasAvailability(flagOn: true, kernelRenders: true, running: true)
-        XCTAssertFalse(kernel.extrasEnabled)
-        XCTAssertFalse(kernel.listenEnabled)
-        XCTAssertEqual(kernel.extrasDisabledReason, DynamicsExtrasAvailability.kernelReason)
-        XCTAssertEqual(kernel.listenDisabledReason, DynamicsExtrasAvailability.kernelReason)
-        XCTAssertTrue(kernel.bypassEnabled, "multiband bypass is the one extra the kernel renders")
-        let idle = DynamicsExtrasAvailability(flagOn: true, kernelRenders: false, running: false)
+        let idle = DynamicsExtrasAvailability(flagOn: true, running: false)
         XCTAssertTrue(idle.extrasEnabled)
         XCTAssertFalse(idle.listenEnabled)
         XCTAssertEqual(idle.listenDisabledReason, DynamicsExtrasAvailability.notRunningReason)
-        let live = DynamicsExtrasAvailability(flagOn: true, kernelRenders: false, running: true)
+        let live = DynamicsExtrasAvailability(flagOn: true, running: true)
         XCTAssertTrue(live.listenEnabled)
         XCTAssertNil(live.listenDisabledReason)
     }

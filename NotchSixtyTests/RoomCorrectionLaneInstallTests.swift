@@ -24,14 +24,13 @@ final class RoomCorrectionLaneInstallTests: XCTestCase {
             programLaneCount: 2, subwooferCount: subs)
     }
 
-    private func engine(rate: Double = 48_000, unified: Bool = true) throws -> AudioIOEngine {
+    private func engine(rate: Double = 48_000) throws -> AudioIOEngine {
         let output = AudioOutputDevice(
             deviceID: 9_101, uid: "lane-install-out", name: "Out", nominalSampleRate: rate,
             availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 384_000)], outputChannelCount: 6)
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: "lane-install-out")
-        engine.unifiedGraphEnabled = unified
         return engine
     }
 
@@ -98,18 +97,6 @@ final class RoomCorrectionLaneInstallTests: XCTestCase {
             sampleRate: 48_000, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs)
         XCTAssertNil(program?.roomLanes)
         XCTAssertEqual(engine.roomCorrectionInactiveReason, .layoutChanged)
-    }
-
-    func testLegacyKernelReportsTheUnifiedGraphIsNeeded() throws {
-        let engine = try engine(unified: false)
-        var inputs = engine.currentLiveGraphInputs
-        inputs.room = RoomCorrectionConfiguration(enabled: true, lanes: try install())
-        let program = try engine.makeUnifiedProgramDSP(
-            sampleRate: 48_000, shape: try shape(), virtualSpeakers: false, subwooferCount: 1, inputs: inputs)
-        XCTAssertNil(program)
-        XCTAssertEqual(engine.roomCorrectionInactiveReason, .needsUnifiedGraph)
-        XCTAssertThrowsError(try RoomCorrectionRateCache().plan(
-            for: try install().design, sampleRate: 48_000, unifiedGraphEnabled: false))
     }
 
     func testLanesAreNeverCarriedByTheStereoKernel() throws {

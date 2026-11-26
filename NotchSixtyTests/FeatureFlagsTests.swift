@@ -178,19 +178,16 @@ final class FeatureFlagsTests: XCTestCase {
         }
     }
 
-    /// E6 S11: the graph is the default renderer; only the frozen-fallback flag selects the kernel.
-    func testGraphIsDefaultAndLegacyKernelFlagSelectsFallback() {
-        XCTAssertTrue(FeatureFlag.all.contains(.legacyKernel))
-        XCTAssertEqual(FeatureFlag.legacyKernel.id, "e6.legacy-kernel")
+    /// E23 K1: the legacy-kernel flag is deleted; a release launch argument naming it is ignored without error.
+    func testDeletedLegacyKernelFlagIsIgnoredOnTheLaunchArgument() {
+        XCTAssertFalse(FeatureFlag.all.contains { $0.id == "e6.legacy-kernel" })
         let plain = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
-        XCTAssertFalse(plain.isEnabled(.legacyKernel), "graph renders by default")
-        let fallback = FeatureFlags(
+        let stale = FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
-            arguments: ["Notch Sixty", "-NotchSixtyFeatures", "e6.legacy-kernel"])
-        XCTAssertTrue(fallback.isEnabled(.legacyKernel))
-        XCTAssertEqual(
-            UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()]).orderPolicy,
-            .canonical)
+            arguments: ["Notch Sixty", "-NotchSixtyFeatures", "e6.legacy-kernel,-e6.legacy-kernel"], environment: [:])
+        for flag in FeatureFlag.all {
+            XCTAssertEqual(stale.isEnabled(flag), plain.isEnabled(flag), "\(flag.id) is unchanged by the stale id")
+        }
     }
 
     // These strings are persisted on users' Macs; renaming one silently resets

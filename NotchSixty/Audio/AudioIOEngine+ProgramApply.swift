@@ -153,7 +153,7 @@ extension AudioIOEngine {
         let rates = selectedOutputDevice?.correctionSampleRates ?? [48_000]
         for rate in rates {
             _ = try await roomCorrectionRateCache.planAsync(
-                for: lanes.design, sampleRate: rate, unifiedGraphEnabled: unifiedGraphEnabled)
+                for: lanes.design, sampleRate: rate)
         }
     }
 
@@ -162,7 +162,7 @@ extension AudioIOEngine {
         guard roomCorrectionConfiguration.enabled, roomCorrectionInactiveReason == nil,
               let lanes = roomCorrectionConfiguration.lanes else { return nil }
         return try? roomCorrectionRateCache.plan(
-            for: lanes.design, sampleRate: sampleRate, unifiedGraphEnabled: unifiedGraphEnabled)
+            for: lanes.design, sampleRate: sampleRate)
     }
 
     func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
@@ -402,11 +402,6 @@ extension AudioIOEngine {
         foldStereoCrossover: Bool = false,
         inputs candidate: LiveGraphInputs? = nil
     ) throws -> UnifiedGraphProgramDSP? {
-        guard unifiedGraphEnabled else {
-            let room = candidate?.room ?? roomCorrectionConfiguration
-            programs.setRoomCorrectionInactiveReason(room.enabled && room.lanes != nil ? .needsUnifiedGraph : nil)
-            return nil
-        }
         let inputs = candidate ?? currentLiveGraphInputs
         let playback = inputs.playback
         if FIRUpdatePolicy.isRawBypassed(playback) || playback.auditionMode == .reference { return nil }

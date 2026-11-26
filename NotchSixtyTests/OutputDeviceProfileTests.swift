@@ -108,12 +108,6 @@ final class OutputDeviceProfileTests: XCTestCase {
         }
     }
 
-    func testLegacyKernelRefusalNamesTheReason() {
-        let message = LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(6).errorDescription ?? ""
-        XCTAssertTrue(message.contains("at most 4 subwoofers"))
-        XCTAssertTrue(message.contains("has 6"))
-    }
-
     func testBassManagedSevenOneFourPlanLeavesNativeLFEUnmappedAndRoutesSubs() throws {
         let profile = sevenOneFourProfile()
         try profile.validateStructure(bassManagementEnabled: true)

@@ -215,14 +215,14 @@ struct PhysicalSubwooferOutputAssignment: Codable, Equatable, Sendable {
     }
 }
 
-/// E8 A3: the two subwoofer limits. The unified graph drives up to 8 sub lanes; the legacy render kernel's
-/// bass-management snapshot is frozen at 4 and refuses more, by name, at session start.
+/// E8 A3: the subwoofer limit. The unified graph drives up to 8 sub lanes. The output map and route plan keep four
+/// fixed sub slots (the shape the N-channel bridge struct still has until E23 K3); sub 5 to 8 use the graph-sub arrays.
 enum SubwooferLimit {
     static let graph = UnifiedGraphConfiguration.maxSubwoofers
-    static let legacyKernel = Int(N60_MAX_SUBWOOFER_OUTPUTS)
+    static let fixedMapSlots = Int(N60_MAX_SUBWOOFER_OUTPUTS)
 
-    /// Route-plan sub arrays hold the legacy 4 entries at least (unchanged for 0 to 4 subs) and grow to the count.
-    static func arrayCount(forSubwooferCount count: Int) -> Int { max(legacyKernel, count) }
+    /// Route-plan sub arrays hold the four fixed entries at least (unchanged for 0 to 4 subs) and grow to the count.
+    static func arrayCount(forSubwooferCount count: Int) -> Int { max(fixedMapSlots, count) }
 }
 
 enum OutputDeviceProfileError: Error, Equatable, LocalizedError {
@@ -725,7 +725,7 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
             }
             return result
         }
-        if bassManagementEnabled, Int(subwooferCount) > SubwooferLimit.legacyKernel {
+        if bassManagementEnabled, Int(subwooferCount) > SubwooferLimit.fixedMapSlots {
             // E8 A3: 5 to 8 subs exist only on the graph path, as sub lanes after the program lanes.
             let lanesCompiled = programPhysicalChannels.withUnsafeBufferPointer { programBuffer in
                 subwooferPhysicalChannels.withUnsafeBufferPointer { subBuffer in

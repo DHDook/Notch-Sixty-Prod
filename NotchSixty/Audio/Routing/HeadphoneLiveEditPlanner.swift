@@ -20,12 +20,9 @@ enum HeadphoneLiveEditPlanner {
         case none
         /// A running binaural session rendered by the unified graph.
         case graph
-        /// A running binaural session on the legacy bridge pipeline.
-        case legacy
     }
 
     struct Context: Equatable {
-        var unifiedGraphEnabled: Bool
         var lifecycleRunning: Bool
         var binauralSession: BinauralSession
         var nChannelSessionActive: Bool
@@ -62,7 +59,7 @@ enum HeadphoneLiveEditPlanner {
         context: Context
     ) -> HeadphoneLiveEditPlan {
         if old == new { return .unchanged }
-        guard context.unifiedGraphEnabled, context.lifecycleRunning, !context.nChannelSessionActive else {
+        guard context.lifecycleRunning, !context.nChannelSessionActive else {
             return .refuse
         }
         switch context.binauralSession {
@@ -71,8 +68,6 @@ enum HeadphoneLiveEditPlanner {
                 return .liveEdit(assetChanged: old.binauralProfile != new.binauralProfile)
             }
             return .reconfigure
-        case .legacy:
-            return .refuse
         case .none:
             if context.stereoHeadphoneGraphActive, let old, let new, sameStereoSessionKind(old, new) {
                 return .liveEdit(assetChanged: false)

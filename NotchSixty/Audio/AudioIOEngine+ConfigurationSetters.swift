@@ -224,15 +224,7 @@ extension AudioIOEngine {
         if dynamicsSoloBands != solo { commitDynamicsSoloBands(solo) }
     }
 
-    var dynamicsHasStereoSession: Bool { transportSession != nil }
-
     func reportDynamicsListenError(_ message: String) { setLastError(message) }
-
-    /// Where the live graph runs, `true` when the frozen kernel renders instead (so the extras cannot play).
-    var dynamicsKernelRenders: Bool {
-        if let session = transportSession { return !session.unifiedGraphActive }
-        return !unifiedGraphEnabled
-    }
 
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
         let validationRate = transportSession?.outputFormat.sampleRate

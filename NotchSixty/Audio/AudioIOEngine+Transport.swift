@@ -111,9 +111,6 @@ extension AudioIOEngine {
 
     /// Checks that apply to any enabled routing, whether it is being set or started.
     func validateSpeakerRoutingActivation(_ routing: SpeakerRoutingConfiguration) throws {
-        guard unifiedGraphEnabled else {
-            throw LiveNChannelTransportError.routingRefused("it needs the unified graph, and the legacy render kernel is selected.")
-        }
         if headphoneDeviceProfileConfiguration?.enabled == true {
             throw HeadphoneDeviceProfileError.speakerProfileConflict
         }
@@ -195,9 +192,7 @@ extension AudioIOEngine {
             outputGain: currentMasterSoftwareGain,
             roomTreatment: nil,
             audioUnitRack: stagedAudioUnitRack,
-            unifiedGraphConfiguration: configuration,
-            unifiedGraphIneligibility: nil,
-            unifiedGraphRequired: true
+            unifiedGraphConfiguration: configuration
         )
         programs.clearAll()
         nChannelTransportSession = session
@@ -210,34 +205,6 @@ extension AudioIOEngine {
         if !speakerDriverProcessingConfiguration.isNeutral {
             throw LiveNChannelTransportError.unsupportedActiveDSP("legacy per-driver speaker processing")
         }
-        // E6 S9a: with the unified graph the stereo-class DSP is mapped onto the program lanes (or the activation
-        // throws the graph's reason); without it every restriction below stays.
-        if !unifiedGraphEnabled {
-            if !stereoEQConfiguration.bypassed {
-                if stereoEQConfiguration.channelMode != .linked
-                    || stereoEQConfiguration.phaseMode != .minimumPhase
-                    || stereoEQConfiguration.enabledBandCount != 0 {
-                    throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ")
-                }
-            }
-            // Gate on what would actually process audio. Disabled processors keep
-            // their edited parameters and must not block activation.
-            if playbackControlConfiguration.globalBypassed {
-                throw LiveNChannelTransportError.globalBypassUnsupported
-            }
-            if playbackControlConfiguration.hasActiveImageProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls")
-            }
-            if dynamicsConfiguration.hasActiveProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics/protection")
-            }
-            if roomCorrectionConfiguration.enabled {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo room correction")
-            }
-            if speakerIRConfiguration.enabled {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo Speaker IR")
-            }
-        }
         if bassManagementConfiguration.physicalOutputMode != nil {
             throw LiveNChannelTransportError.unsupportedActiveDSP("legacy physical crossover routing")
         }
@@ -248,7 +215,7 @@ extension AudioIOEngine {
     func foldsStereoCrossover(
         routePlan: LiveNChannelOutputRoutePlan, bass: BassManagementConfiguration, requiresRackFree: Bool = false
     ) -> Bool {
-        guard unifiedGraphEnabled, bass.enabled, !routePlan.isRouted, routePlan.subwooferCount >= 1,
+        guard bass.enabled, !routePlan.isRouted, routePlan.subwooferCount >= 1,
               !(requiresRackFree && stagedAudioUnitRack != nil),
               let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles),
               shape.laneCount == 2, shape.lfeLane == nil else { return false }
@@ -285,54 +252,35 @@ extension AudioIOEngine {
                 throw LiveNChannelTransportError.roomTreatmentPermitMismatch
             }
         }
-        // E8 A3: the legacy kernel drives at most 4 subs; refuse by name rather than truncate. The graph path below
-        // takes 5 to 8 and must then be required (checked after eligibility).
-        if bassManagementConfiguration.enabled,
-           Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel,
-           !unifiedGraphEnabled {
-            throw LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(Int(routePlan.subwooferCount))
-        }
         let graph = try LiveNChannelRenderGraphCompiler.makeGraph(
             routePlan: routePlan,
             sampleRate: output.nominalSampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration: bassManagementConfiguration
         )
-        var graphConfiguration: UnifiedGraphConfiguration?
-        var graphIneligibility: UnifiedGraphFallbackReason?
-        var programDSP: UnifiedGraphProgramDSP?
-        let ancSplitter = unifiedGraphEnabled
-            ? hostedQuietZoneSplitter(routePlan: routePlan, sampleRate: output.nominalSampleRate) : nil
-        if unifiedGraphEnabled {
-            // E6 S9a: stereo-class DSP runs on the graph or activation throws; it is never dropped.
-            guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
-                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
-            }
-            programDSP = try makeUnifiedProgramDSP(
-                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false,
-                subwooferCount: Int(routePlan.subwooferCount), foldStereoCrossover: foldsCrossover)
-            switch UnifiedGraphTranslator.nChannelEligibility(
-                routePlan: routePlan,
-                sampleRate: output.nominalSampleRate,
-                gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
-                programDSP: programDSP,
-                ancHostFeed: ancSplitter != nil,
-                userOutputGain: currentMasterSoftwareGain
-            ) {
-            case .success(var configuration):
-                attachStagedMIMOTreatment(to: &configuration)
-                graphConfiguration = configuration
-            case .failure(let reason): graphIneligibility = reason
-            }
+        let ancSplitter = hostedQuietZoneSplitter(routePlan: routePlan, sampleRate: output.nominalSampleRate)
+        // E23 K1: the graph is the only renderer. Stereo-class DSP runs on it or activation throws the named reason;
+        // nothing is dropped and no unprocessed audio plays.
+        guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
-        // E8 A3: a graph that cannot take the setup would fall back to the legacy kernel; with 5 to 8 subs that is
-        // a refusal, not a truncation.
-        let needsGraphForSubs = bassManagementConfiguration.enabled
-            && Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel
-        if needsGraphForSubs, graphConfiguration == nil {
-            throw LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(Int(routePlan.subwooferCount))
+        let programDSP = try makeUnifiedProgramDSP(
+            sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false,
+            subwooferCount: Int(routePlan.subwooferCount), foldStereoCrossover: foldsCrossover)
+        var graphConfiguration: UnifiedGraphConfiguration
+        switch UnifiedGraphTranslator.nChannelEligibility(
+            routePlan: routePlan,
+            sampleRate: output.nominalSampleRate,
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration: bassManagementConfiguration,
+            programDSP: programDSP,
+            ancHostFeed: ancSplitter != nil,
+            userOutputGain: currentMasterSoftwareGain
+        ) {
+        case .success(let configuration): graphConfiguration = configuration
+        case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
         }
+        attachStagedMIMOTreatment(to: &graphConfiguration)
         let session = try CoreAudioNChannelTransportSession(
             selectedOutput: output,
             routePlan: routePlan,
@@ -341,10 +289,6 @@ extension AudioIOEngine {
             roomTreatment: stagedRoomTreatment,
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphConfiguration: graphConfiguration,
-            unifiedGraphIneligibility: graphIneligibility,
-            // E6 S12g4: with the graph on, every N-channel session runs on it or activation throws the named reason; only an
-            // Audio Unit rack (not a graph stage) keeps the legacy pipeline.
-            unifiedGraphRequired: unifiedGraphEnabled && stagedAudioUnitRack == nil || needsGraphForSubs,
             ancFeedSplitter: ancSplitter
         )
         programs.clearAll()
@@ -382,24 +326,6 @@ extension AudioIOEngine {
         }
         if !speakerDriverProcessingConfiguration.isNeutral {
             throw LiveNChannelTransportError.unsupportedActiveDSP("per-driver speaker processing")
-        }
-        if !unifiedGraphEnabled {
-            if !stereoEQConfiguration.bypassed {
-                if stereoEQConfiguration.channelMode != .linked
-                    || stereoEQConfiguration.phaseMode != .minimumPhase
-                    || stereoEQConfiguration.enabledBandCount != 0 {
-                    throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ in Virtual Speakers mode")
-                }
-            }
-            if playbackControlConfiguration.globalBypassed {
-                throw LiveNChannelTransportError.globalBypassUnsupported
-            }
-            if playbackControlConfiguration.hasActiveImageProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls in Virtual Speakers mode")
-            }
-            if dynamicsConfiguration.hasActiveProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics in Virtual Speakers mode")
-            }
         }
         if bassManagementConfiguration.enabled
             || bassManagementConfiguration.physicalOutputMode != nil
@@ -453,19 +379,16 @@ extension AudioIOEngine {
         guard programGain.isFinite, programGain > 0, programGain <= 16 else {
             throw BinauralHeadphoneTransportError.bridgeAllocationFailed
         }
-        // E6 S8b2d: with the flag on, the core renders binaural, headphone DSP and protection when
-        // the setup is one it reproduces; otherwise the legacy pipeline stays and the reason shows
-        // in diagnostics.
-        var graphSpec: UnifiedGraphSpec?
-        var graphBaseSpec: UnifiedGraphSpec?
-        var graphIneligibility: UnifiedGraphFallbackReason?
-        var programDSP: UnifiedGraphProgramDSP?
-        if unifiedGraphEnabled {
-            guard let shape = UnifiedGraphLayoutShape(roles: profile.programLayout.roles) else {
-                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
-            }
-            programDSP = try makeUnifiedProgramDSP(
-                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: true)
+        // E23 K1: the core renders binaural, headphone DSP and protection. A setup it cannot reproduce ends the start
+        // with the named reason; there is no legacy pipeline to fall back to.
+        let graphSpec: UnifiedGraphSpec
+        let graphBaseSpec: UnifiedGraphSpec
+        guard let shape = UnifiedGraphLayoutShape(roles: profile.programLayout.roles) else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+        }
+        let programDSP = try makeUnifiedProgramDSP(
+            sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: true)
+        do {
             switch UnifiedGraphTranslator.binauralBaseSpec(
                 asset: asset,
                 layout: profile.programLayout,
@@ -482,16 +405,10 @@ extension AudioIOEngine {
                 case .success(let spec):
                     graphBaseSpec = base
                     graphSpec = spec
-                case .failure(let reason): graphIneligibility = reason
+                case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
                 }
-            case .failure(let reason): graphIneligibility = reason
+            case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
-        }
-        // E13 S4: a response longer than the legacy renderer's taps renders only through the unified graph's
-        // early/tail split; the dormant legacy bridge gets the truncation, and without a graph the setup is refused.
-        let longResponse = asset.tapCount > Int(N60_BINAURAL_MAX_TAPS)
-        if longResponse, graphSpec == nil {
-            throw BinauralHeadphoneTransportError.longResponseNeedsUnifiedGraph
         }
         let session = try CoreAudioBinauralHeadphoneTransportSession(
             selectedOutput: output,
@@ -503,9 +420,7 @@ extension AudioIOEngine {
             outputGain: currentMasterSoftwareGain,
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphSpec: graphSpec,
-            unifiedGraphBaseSpec: graphBaseSpec,
-            unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: (unifiedGraphEnabled && stagedAudioUnitRack == nil) || longResponse
+            unifiedGraphBaseSpec: graphBaseSpec
         )
         programs.clearAll()
         transport.setBinauralHeadphoneSession(session)
@@ -638,12 +553,10 @@ extension AudioIOEngine {
             programSource: foldSource,
             programFoldPlan: foldPlan
         )
-        session.unifiedGraphEnabled = unifiedGraphEnabled
         // E6 S12h part 2b: a plain stereo speaker session renders the Quiet Zone on the unified graph (the ANC lane feed
         // as its EXTERNAL stage). Decided here, before the first graph is built, and never changed for the session.
         // Authorisation is unchanged: only a snapshot carrying `activeQuietZone.enabled` (an armed target) arms the feed.
-        session.hostsQuietZoneFeedRequested = unifiedGraphEnabled && FeatureFlags().isEnabled(.subAwareAnc)
-            && headphoneSnapshot == nil && foldSource == nil
+        session.hostsQuietZoneFeedRequested = headphoneSnapshot == nil && foldSource == nil
             && headphoneDeviceProfileConfiguration?.enabled != true
             && outputDeviceProfileConfiguration?.enabled != true
             && multiOutputRoutingConfiguration?.enabled != true

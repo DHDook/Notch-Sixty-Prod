@@ -281,7 +281,6 @@ final class UnifiedGraphProgramFamilyTests: XCTestCase {
     func testEngineBuildsTheDeltaForSpeakersAndRefusesItForVirtualSpeakers() throws {
         let rate = 48_000.0
         let engine = try engine(rate: rate)
-        engine.unifiedGraphEnabled = true
         let shape = try XCTUnwrap(UnifiedGraphLayoutShape(roles: OutputProgramLayout.fiveOne.roles))
         var inputs = engine.currentLiveGraphInputs
         inputs.playback.auditionMode = .delta
@@ -340,7 +339,6 @@ final class UnifiedGraphProgramFamilyTests: XCTestCase {
         _ engine: AudioIOEngine, rate: Double, bass: BassManagementConfiguration, subs: Int = 1,
         audition: AuditionMode = .processed
     ) throws -> UnifiedGraphConfiguration {
-        engine.unifiedGraphEnabled = true
         var inputs = engine.currentLiveGraphInputs
         inputs.bass = bass
         inputs.playback.auditionMode = audition
@@ -433,7 +431,6 @@ final class UnifiedGraphProgramFamilyTests: XCTestCase {
             PhysicalSubwooferCalibration(gainDB: -3, delayMilliseconds: 2, polarityInverted: true, eqBands: []),
             nil,
         ])
-        engine.unifiedGraphEnabled = true
         var inputs = engine.currentLiveGraphInputs
         inputs.bass = crossoverBass(gainDB: -6, invert: true, align: true)
         let shape = try XCTUnwrap(UnifiedGraphLayoutShape(roles: OutputProgramLayout.stereo.roles))
@@ -457,7 +454,6 @@ final class UnifiedGraphProgramFamilyTests: XCTestCase {
     func testOtherLayoutsAndRoutesDoNotFold() throws {
         let rate = 48_000.0
         let engine = try engine(rate: rate)
-        engine.unifiedGraphEnabled = true
         var inputs = engine.currentLiveGraphInputs
         inputs.bass = crossoverBass(mode: .mainsOnly)
         let fiveOne = try XCTUnwrap(UnifiedGraphLayoutShape(roles: OutputProgramLayout.fiveOne.roles))

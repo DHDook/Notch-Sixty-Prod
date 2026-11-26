@@ -43,7 +43,6 @@ final class E33ShipEndToEndPart5Tests: XCTestCase {
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: "e33ship5-out")
-        engine.unifiedGraphEnabled = true
         return engine
     }
 
