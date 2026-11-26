@@ -10,6 +10,8 @@ extension AudioIOEngine {
 
     func makeMIMOGraphTreatment() -> MIMOGraphTreatment {
         let treatment = MIMOGraphTreatment(flags: FeatureFlags())
+        // E12 S28b2: an open system comparison ends and restores before this treatment arms.
+        treatment.willArm = { [weak self] in self?.endAuditionForArming() }
         treatment.publish = { [weak self] stage in
             // A failed post throws; the controller keeps the word and re-posts it from every poll tick.
             guard let session = self?.nChannelTransportSession else { throw MIMOGraphTreatment.ArmRefusal.stageNotAttached }

@@ -1171,6 +1171,8 @@ final class AudioIOEngine {
     /// E24 S9, E12 S28b1: what the blind comparison plays instead of the stored system settings. Never persisted; Stop,
     /// an output change and a session teardown clear it. Setter and refusals: `AudioIOEngine+AuditionOverride.swift`.
     var auditionOverride: AuditionOverride?
+    /// Set by an open comparison page: called before a live treatment arms so the test ends and restores first.
+    var auditionEndRequest: (@MainActor () -> Void)?
 
     /// Plays (or, with nil, stops) the E11 generator on the running graph through the normal republish path:
     /// N-channel graphs through `republishLiveGraph`, the stereo graph through its transport session. Throws and
@@ -1267,44 +1269,7 @@ final class AudioIOEngine {
         _ inputs: LiveGraphInputs, headphoneBase: UnifiedGraphSpec? = nil, routing: SpeakerRoutingConfiguration? = nil
     ) throws {
         if let session = nChannelTransportSession {
-            let rate = session.outputFormat.sampleRate
-            // The delta refusal comes before the program build so a refused edit costs nothing (G51).
-            if session.routePlan.isRouted, inputs.playback.auditionMode == .delta {
-                throw LiveNChannelTransportError.routingRefused("the delta audition is not available with speaker routing; switch to Processed or Reference.")
-            }
-            guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else {
-                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
-            }
-            let folds = foldsStereoCrossover(
-                routePlan: session.routePlan, bass: renderBassManagementConfiguration(inputs.bass), requiresRackFree: true)
-            if !folds { try requireNoCrossoverAudition(inputs.bass) }
-            let program = try makeUnifiedProgramDSP(
-                sampleRate: rate, shape: shape, virtualSpeakers: false,
-                subwooferCount: Int(session.routePlan.subwooferCount), foldStereoCrossover: folds, inputs: inputs)
-            var configuration: UnifiedGraphConfiguration
-            if session.routePlan.isRouted {
-                guard let activeRouting = routing ?? speakerRoutingConfiguration, activeRouting.enabled else {
-                    throw LiveNChannelTransportError.routingRefused("the session is routed but no routing is set.")
-                }
-                configuration = try makeRoutedGraphConfiguration(
-                    routing: activeRouting, routePlan: session.routePlan, sampleRate: rate, inputs: inputs)
-            } else {
-                switch UnifiedGraphTranslator.nChannelEligibility(
-                    routePlan: session.routePlan, sampleRate: rate, gainConfiguration: inputs.gain,
-                    bassManagementConfiguration: renderBassManagementConfiguration(inputs.bass), programDSP: program
-                ) {
-                case .success(let built): configuration = built
-                case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
-                }
-            }
-            if let generator = inputs.generator {
-                guard let mask = generator.selection.mask(laneCount: shape.laneCount, lfeLane: shape.lfeLane),
-                      let params = generator.stageParams(sampleRate: rate) else {
-                    throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
-                }
-                configuration.generatorParams = params
-                configuration.generatorLaneMask = mask
-            }
+            let configuration = try makeLiveGraphConfiguration(session: session, inputs: inputs, routing: routing)
             // E19 S6: a new topology rebuilds the graph, so the switch goes off first: the disarm word is stored with the
             // stage and the rebuilt graph carries it disarmed (a rebuild never fades through live treatment).
             if session.mimoStageAttached { mimoGraphTreatment.graphRebuilt() }
