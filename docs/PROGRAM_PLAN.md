@@ -709,7 +709,7 @@ unified graph only.
 - [x] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h); K1 `e23/kernel-off-render-path` (E23 G22)
 - [ ] T1 `e23/kernel-tests-xctest` and T2 `e23/kernel-tests-harnesses`: migrate or retire every kernel-referencing XCTest and C harness (graph-only, frozen corpus or retire; E23 G21)
-- [ ] S4 part 4 `e23/s4-part4-setter-protection`: restore setter protection on the 63 relaxed properties and move the keyboard volume region, after E16 S2 (E23 G20)
+- [x] S4 part 4 `e23/s4-part4-setter-protection`: restore setter protection on the 63 relaxed properties and move the keyboard volume region, after E16 S2 (E23 G20)
 - [x] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 43 files (not 17) that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
 - [x] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner): deleted `ContentView.swift` and its debug tab; controls with no production home are in E23 G17 (S9)
 - [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
@@ -723,6 +723,7 @@ unified graph only.
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag: flag in K1, stereo kernel in K2 (closes E23 G8), N-channel path in K3
 - [ ] With the kernel: delete the bridge per-frame output loop (E20 G8), the hand-set flush-to-zero in `N60OutputIOProc` (E20 G9), and the trusted legacy `nonblocking` declarations (E20 G44); K2
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21; K3
+- [ ] Enforce the publish-then-commit order for the configuration setters (E23 G23; the commit mutators store only); K3
 
 ### E22 Hardware validation
 

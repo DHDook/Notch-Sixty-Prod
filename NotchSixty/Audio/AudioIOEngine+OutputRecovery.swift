@@ -10,14 +10,14 @@ extension AudioIOEngine {
     /// the size each device had before.
     func setLowLatencyOutputProfile(_ enabled: Bool) {
         guard enabled != lowLatencyOutputProfileActive else { return }
-        lowLatencyOutputProfileActive = enabled
+        recovery.setLowLatencyOutputProfileActive(enabled)
         if enabled {
-            lowLatencyRestorePending = false
+            recovery.setLowLatencyRestorePending(false)
             lowLatencyBufferProfile.activate()
         } else {
-            lowLatencyOutputBufferFrames = nil
+            recovery.setLowLatencyOutputBufferFrames(nil)
             if lifecycle.state == .running {
-                lowLatencyRestorePending = true
+                recovery.setLowLatencyRestorePending(true)
             } else {
                 restoreLowLatencyBuffers()
             }
@@ -31,28 +31,28 @@ extension AudioIOEngine {
     /// Puts back the buffer sizes the profile replaced. Only while no
     /// transport is open.
     func restoreLowLatencyBuffers() {
-        lowLatencyRestorePending = false
+        recovery.setLowLatencyRestorePending(false)
         let devices = outputDevices
         let result = lowLatencyBufferProfile.deactivate { uid in
             devices.first { $0.uid == uid }?.deviceID
         }
         if let failure = result.failures.first {
-            lastErrorDescription = failure.localizedDescription
+            setLastError(failure.localizedDescription)
         }
     }
 
     func applyLowLatencyOutputProfile(to output: AudioOutputDevice) {
         guard lowLatencyOutputProfileActive else { return }
         do {
-            lowLatencyOutputBufferFrames = try lowLatencyBufferProfile.apply(
+            recovery.setLowLatencyOutputBufferFrames(try lowLatencyBufferProfile.apply(
                 to: output.deviceID,
                 uid: output.uid,
                 sampleRate: output.nominalSampleRate
-            )
+            ))
         } catch {
             // Best effort: the transport opens at the device's current size.
-            lowLatencyOutputBufferFrames = nil
-            lastErrorDescription = error.localizedDescription
+            recovery.setLowLatencyOutputBufferFrames(nil)
+            setLastError(error.localizedDescription)
         }
     }
 
@@ -67,7 +67,7 @@ extension AudioIOEngine {
     ) {
         guard lifecycle.state == .running else { return }
 
-        reconfigurationWorkItem?.cancel()
+        recovery.cancelReconfiguration()
         do {
             try setLifecycle(.reconfiguring)
             eventMonitor.removeSelectedOutputSampleRateMonitor()
@@ -81,7 +81,7 @@ extension AudioIOEngine {
         let workItem = DispatchWorkItem { [weak self] in
             self?.performSampleRateReconfiguration(countsAsSampleRateChange: countsAsSampleRateChange)
         }
-        reconfigurationWorkItem = workItem
+        recovery.scheduleReconfiguration(workItem)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay, execute: workItem)
     }
 
@@ -98,10 +98,10 @@ extension AudioIOEngine {
             try buildTransport(output: output)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
             try syncMasterVolumeMonitorToSelectedOutput()
-            if countsAsSampleRateChange { sampleRateChangesHandled &+= 1 }
-            reconfigurationWorkItem = nil
+            if countsAsSampleRateChange { recovery.recordSampleRateChange() }
+            recovery.finishReconfiguration()
             try setLifecycle(.running)
-            lastErrorDescription = nil
+            setLastError(nil)
             requestAudioUnitRackRebuildIfPending()
         } catch {
             tearDownTransport(fadeOut: false)
@@ -111,9 +111,7 @@ extension AudioIOEngine {
 
     func beginOutputRecovery() {
         guard lifecycle.state == .running || lifecycle.state == .reconfiguring else { return }
-        recoveryGeneration &+= 1
-        recoveryConsecutiveBuildFailures = 0
-        let generation = recoveryGeneration
+        let generation = recovery.beginRecoveryGeneration()
         try? setLifecycle(.recoveringOutput)
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         tearDownTransport(fadeOut: false, cause: .outputLost)
@@ -125,20 +123,19 @@ extension AudioIOEngine {
 
     func scheduleRecoveryAttempt(generation: UInt64, delay: TimeInterval) {
         guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
-        recoveryWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in self?.performRecoveryAttempt(generation: generation) }
-        recoveryWorkItem = workItem
+        recovery.scheduleRecovery(workItem)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     func performRecoveryAttempt(generation: UInt64) {
         guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
-        recoveryAttempts &+= 1
+        recovery.recordRecoveryAttempt()
 
         do {
             try refreshOutputDevices()
             guard let output = selectedOutputDevice else {
-                lastErrorDescription = "Waiting for selected output to return."
+                setLastError("Waiting for selected output to return.")
                 scheduleRecoveryAttempt(
                     generation: generation,
                     delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
@@ -149,7 +146,7 @@ extension AudioIOEngine {
             if case .waitForSource(let uid) = programFoldBuildDecision(for: output) {
                 // The wider source is absent: wait for the same UID, never tap the DAC or another 6-channel device.
                 // Not a build failure, so it never counts toward the retry limit.
-                lastErrorDescription = ProgramFoldDownError.sourceUnavailable(uid: uid).errorDescription
+                setLastError(ProgramFoldDownError.sourceUnavailable(uid: uid).errorDescription)
                 scheduleRecoveryAttempt(
                     generation: generation,
                     delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
@@ -161,35 +158,33 @@ extension AudioIOEngine {
                 try buildTransport(output: output)
                 try eventMonitor.monitorSampleRate(of: output.deviceID)
                 try syncMasterVolumeMonitorToSelectedOutput()
-                recoverySuccesses &+= 1
-                recoveryConsecutiveBuildFailures = 0
+                recovery.recordRecoverySuccess()
                 try setLifecycle(.running)
-                lastErrorDescription = nil
-                recoveryWorkItem = nil
+                setLastError(nil)
+                recovery.finishRecovery()
                 requestAudioUnitRackRebuildIfPending()
                 return
             } catch {
-                recoveryFailures &+= 1
-                recoveryConsecutiveBuildFailures += 1
+                let consecutiveFailures = recovery.recordRecoveryBuildFailure()
                 tearDownTransport(fadeOut: false)
                 if OutputRecoveryRetryPolicy.shouldFail(
-                    afterConsecutiveFailures: recoveryConsecutiveBuildFailures
+                    afterConsecutiveFailures: consecutiveFailures
                 ) {
-                    recoveryWorkItem = nil
+                    recovery.finishRecovery()
                     forceFailedState(error)
                     return
                 }
-                lastErrorDescription = "Selected output is present but not ready yet: \(error.localizedDescription)"
+                setLastError("Selected output is present but not ready yet: \(error.localizedDescription)")
                 scheduleRecoveryAttempt(
                     generation: generation,
                     delay: OutputRecoveryRetryPolicy.buildRetryDelay(
-                        afterConsecutiveFailures: recoveryConsecutiveBuildFailures
+                        afterConsecutiveFailures: consecutiveFailures
                     )
                 )
                 return
             }
         } catch {
-            lastErrorDescription = error.localizedDescription
+            setLastError(error.localizedDescription)
         }
 
         scheduleRecoveryAttempt(
@@ -200,10 +195,10 @@ extension AudioIOEngine {
 
     func handleWillSleep() {
         guard lifecycle.state == .running else {
-            resumeAfterWake = false
+            recovery.setResumeAfterWake(false)
             return
         }
-        resumeAfterWake = true
+        recovery.setResumeAfterWake(true)
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         masterVolumeController.stopMonitoring()
         try? setLifecycle(.stopping)
@@ -213,19 +208,18 @@ extension AudioIOEngine {
 
     func handleDidWake() {
         guard resumeAfterWake else { return }
-        resumeAfterWake = false
+        recovery.setResumeAfterWake(false)
         guard lifecycle.state == .idle else { return }
         // USB and Thunderbolt outputs often re-enumerate after didWake. Wait for
         // the same output UID through the recovery loop instead of making one
         // start attempt that leaves processing stopped if the device is late.
-        recoveryGeneration &+= 1
-        recoveryConsecutiveBuildFailures = 0
+        let generation = recovery.beginRecoveryGeneration()
         do {
             try setLifecycle(.recoveringOutput)
         } catch {
-            lastErrorDescription = error.localizedDescription
+            setLastError(error.localizedDescription)
             return
         }
-        scheduleRecoveryAttempt(generation: recoveryGeneration, delay: 0)
+        scheduleRecoveryAttempt(generation: generation, delay: 0)
     }
 }

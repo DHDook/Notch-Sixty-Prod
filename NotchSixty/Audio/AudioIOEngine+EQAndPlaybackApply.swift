@@ -53,17 +53,17 @@ extension AudioIOEngine {
                 // programs or fading an audibly identical raw graph.
                 try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
-                activeEQFIRProgram = nil
-                linearPhaseDesignInfo = nil
+                programs.setActiveEQFIRProgram(nil)
+                programs.setLinearPhaseDesignInfo(nil)
             } else {
                 var preparedEQFIRProgram: PreparedEQFIRProgram?
                 if rendered.requiresEQFIRProgram && !rendered.bypassed {
                     let prepared = try prepareEQFIRProgram(rendered, for: session)
                     preparedEQFIRProgram = prepared
-                    linearPhaseDesignInfo = prepared.designInfo
+                    programs.setLinearPhaseDesignInfo(prepared.designInfo)
                     try attachEQFIRProgram(prepared, to: &graph)
                 } else {
-                    linearPhaseDesignInfo = nil
+                    programs.setLinearPhaseDesignInfo(nil)
                 }
 
                 try attachActiveRoomCorrectionProgramIfNeeded(
@@ -81,16 +81,16 @@ extension AudioIOEngine {
                     try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
                 }
-                activeEQFIRProgram = preparedEQFIRProgram
+                programs.setActiveEQFIRProgram(preparedEQFIRProgram)
             }
         } else {
-            activeEQFIRProgram = nil
-            linearPhaseDesignInfo = nil
+            programs.setActiveEQFIRProgram(nil)
+            programs.setLinearPhaseDesignInfo(nil)
         }
 
-        stereoEQConfiguration = configuration
-        eqConfiguration = legacyEQConfiguration(from: configuration)
-        lastErrorDescription = nil
+        commitStereoEQConfiguration(configuration)
+        commitEQConfiguration(legacyEQConfiguration(from: configuration))
+        setLastError(nil)
     }
 
     func applyPlaybackControlConfiguration(_ configuration: PlaybackControlConfiguration) throws {
@@ -129,8 +129,8 @@ extension AudioIOEngine {
                 ) {
                     if activeEQFIRProgram == nil {
                         let prepared = try prepareEQFIRProgram(renderStereoEQConfiguration, for: session)
-                        activeEQFIRProgram = prepared
-                        linearPhaseDesignInfo = prepared.designInfo
+                        programs.setActiveEQFIRProgram(prepared)
+                        programs.setLinearPhaseDesignInfo(prepared.designInfo)
                     }
                     try attachActiveEQFIRProgramIfNeeded(
                         to: &graph,
@@ -144,7 +144,7 @@ extension AudioIOEngine {
                         throw RoomCorrectionConfigurationError.filterRequired
                     }
                     if activeRoomCorrectionProgram == nil {
-                        activeRoomCorrectionProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                        programs.setActiveRoomCorrectionProgram(try prepareRoomCorrectionProgram(filter, for: session))
                     }
                     try attachActiveRoomCorrectionProgramIfNeeded(
                         to: &graph,
@@ -157,7 +157,7 @@ extension AudioIOEngine {
                         throw SpeakerIRConfigurationError.filterRequired
                     }
                     if activeSpeakerIRProgram == nil {
-                        activeSpeakerIRProgram = try prepareSpeakerIRProgram(filter, for: session)
+                        programs.setActiveSpeakerIRProgram(try prepareSpeakerIRProgram(filter, for: session))
                     }
                     try attachActiveSpeakerIRProgramIfNeeded(
                         to: &graph,
@@ -176,7 +176,7 @@ extension AudioIOEngine {
             }
         }
 
-        playbackControlConfiguration = configuration
-        lastErrorDescription = nil
+        commitPlaybackControlConfiguration(configuration)
+        setLastError(nil)
     }
 }
