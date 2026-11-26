@@ -104,6 +104,26 @@ enum RoomModelLiveWiring {
             try RoomModelConsumerAccess.seats(
                 seatIDs, model: model, context: context(), consumer: .mimoPlant, derivedPointIDs: derived)
         }
+        // G20: the E26 sub path and E4 Quiet Zone designs read their combined path records through the model.
+        func ancGate(_ records: [CombinedAncPathRecord], _ consumer: RoomModelConsumer) throws -> [CombinedAncPathRecord] {
+            let model = RoomModelAdapter.build(RoomModelAdapterInput(combinedAncRecords: records))
+            return try RoomModelConsumerAccess.ancRecords(records, model: model, context: context(), consumer: consumer)
+        }
+        survey.roomModelGate = ancGate
+        // G20: the head-follow blend is allowed only while those paths are current. The verdict is cached on the
+        // inputs that can change it, because the blend asks on every update.
+        final class Verdict { var key: String?; var allowed = true }
+        let verdict = Verdict()
+        quietZone.virtualMic?.headFollow?.roomModelGate = { [weak survey] in
+            guard let survey else { return true }
+            let inputs = live()
+            let key = "\(inputs.outputDeviceUID ?? "-")|\(inputs.arrangementRevision ?? "-")|\(survey.leakageRecords.count)"
+            if verdict.key != key {
+                verdict.key = key
+                verdict.allowed = (try? ancGate(survey.leakageRecords, .virtualSeat)) != nil
+            }
+            return verdict.allowed
+        }
         advisor.roomModelLive = live
         ambient.seatMusicFeed = advisor.seatMusicFeed
     }
